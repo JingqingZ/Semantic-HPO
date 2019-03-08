@@ -2,21 +2,36 @@
 # Data loading and early analysis on data
 
 import os
+import re
 import json
 import pronto
 import pandas as pd
 import matplotlib.pyplot as plt
 
 # environment variables, subject to changes according to local environment
-# the folder that contains data
-data_dir = "../../data/MedicalText/"
+# the folder that contains original data
+data_dir = "../data/"
+if not os.path.exists(data_dir):
+    os.makedirs(data_dir)
+
 # the path to HPO ontology file
+# download link: https://hpo.jax.org/app/download/ontology
 hpo_ontology_file = data_dir + "HPO/hp.owl"
-hpo_description_file = data_dir + "HPO/description.json"
 # the path to MIMIC-III files
-mimic_note_file = data_dir + "MIMIC/data/NOTEEVENTS.csv"
-mimic_diag_file = data_dir + "MIMIC/data/DIAGNOSES_ICD.csv"
-mimic_file = data_dir + "MIMIC/data/ready.csv"
+# download link: https://mimic.physionet.org/
+# application to access the data required
+mimic_note_file = data_dir + "MIMIC/NOTEEVENTS.csv"
+mimic_diag_file = data_dir + "MIMIC/DIAGNOSES_ICD.csv"
+
+# intermediate files which will be created
+# created by load_hpo_description()
+hpo_description_file = data_dir + "HPO/description.json"
+# created by load_mimic()
+mimic_file = data_dir + "MIMIC/ready.csv"
+# created get_corpus()
+text_corpus_file = data_dir + "corpus.txt"
+# created get_vocab()
+vocab_file = data_dir + "vocab.txt"
 
 def load_hpo_ontology():
     ont = pronto.Ontology(hpo_ontology_file)
@@ -168,6 +183,10 @@ def load_mimic():
 
         diag_data.to_csv(mimic_diag_file + "_processed.csv")
 
+        # the extreme size of diag_data and note_data may lead to failure of this step
+        # If failed, load processed diag_data and note_data from corresponding xxx_processed.csv files
+        # then merge them and save.
+        # sound tricky to be honest.
         result = pd.merge(diag_data, note_data, on='HADM_ID')
         # print(result)
 
@@ -180,8 +199,35 @@ def load_mimic():
 
     return result
 
+def get_corpus():
+
+    # TODO: create corpus, form [CLS] [SEQ] []
+    # TODO: create vocabulary
+    # TODO: corpus with MIMIC + HPO
+
+    # TODO: reset
+    # if not os.path.exists(text_corpus_file):
+    if True:
+        mimic_data = load_mimic()
+        text_data = mimic_data["TEXT"].tolist()
+        t = text_data[0].strip()
+        t = re.sub(r"\[\*\*.*\*\*\]", "[UNK]", t)
+        # t = t.split("\n")
+        # t = "".join([l if l != "" else "\n" for l in t])
+        print(t)
+
+
+        # with open(text_corpus_file, 'w') as outfile:
+        #     outfile.write(text_data)
+    else:
+        with open(text_corpus_file, 'r') as infile:
+            text_data = infile.read()
+
+    return text_data
+
 if __name__ == "__main__":
     # load_hpo_ontology()
     # plot_hpo_ontology(data)
-    load_hpo_description()
+    # load_hpo_description()
     # load_mimic()
+    get_corpus()
