@@ -6,6 +6,7 @@ from pytorch_pretrained_bert import BertTokenizer, BertForPreTraining
 
 import config
 import dataloader
+from dataset import BERTDataset
 
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s -   %(message)s',
                     datefmt='%m/%d/%Y %H:%M:%S',
@@ -15,6 +16,7 @@ logger = logging.getLogger(__name__)
 
 def main():
 
+    ## Settings
     device = torch.device("cuda")
     n_gpu = torch.cuda.device_count()
     logger.info("device: {} n_gpu: {}".format(device, n_gpu))
@@ -22,14 +24,18 @@ def main():
     if not os.path.exists(config.outputs_dir):
         os.makedirs(config.outputs_dir)
 
-    tokenizer = BertTokenizer.from_pretrained(config.bert_model, do_lower_case=True)
+    ## create dataset
+    corpus_data = dataloader.get_corpus()
+    tokenizer = BertTokenizer(dataloader.vocab_file, do_lower_case=True)
 
-    text_data = dataloader.get_corpus()[:1000]
-    split_text = tokenizer.tokenize(text_data)
-    print(text_data)
-    print("=====")
-    print(split_text)
+    train_dataset = BERTDataset(corpus_data, tokenizer, seq_len=config.sequence_length)
 
+    num_train_steps = int(
+        len(train_dataset) / config.train_batch_size * config.train_epoch
+    )
+
+
+    exit()
 
     model = BertForPreTraining.from_pretrained(config.bert_model)
     model.to(device)

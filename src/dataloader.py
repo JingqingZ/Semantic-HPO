@@ -6,7 +6,8 @@ import re
 import json
 import pronto
 import pandas as pd
-import matplotlib.pyplot as plt
+
+import config
 
 # environment variables, subject to changes according to local environment
 # the folder that contains original data
@@ -199,30 +200,93 @@ def load_mimic():
 
     return result
 
-def get_corpus():
+# TODO include hpo descirption into the corpus and vocab
+def get_corpus(most_common=config.vocabulary_size, sentence_length=32, rebuild=False):
 
-    # TODO: create corpus, form [CLS] [SEQ] []
-    # TODO: create vocabulary
-    # TODO: corpus with MIMIC + HPO
+    from collections import Counter
+    from tqdm import tqdm
+    counter = Counter()
 
-    # TODO: reset
-    # if not os.path.exists(text_corpus_file):
-    if True:
+    if not os.path.exists(vocab_file) or not os.path.exists(text_corpus_file) or rebuild:
         mimic_data = load_mimic()
         text_data = mimic_data["TEXT"].tolist()
-        t = text_data[0].strip()
-        t = re.sub(r"\[\*\*.*\*\*\]", "[UNK]", t)
-        # t = t.split("\n")
-        # t = "".join([l if l != "" else "\n" for l in t])
-        print(t)
 
+        # import spacy
+        # nlp = spacy.load("en_core_web_sm")
 
-        # with open(text_corpus_file, 'w') as outfile:
-        #     outfile.write(text_data)
+        white_space = [" ", "\n", "\r", "\t", "\f", "\v"]
+        special_token_to_ignore = ["?"]
+
+        doc_list = []
+        print("Processing the original data and creating vocabulary ...")
+        for doc in tqdm(text_data[:]):
+            # doc = doc.strip()
+            doc = doc.lower()
+            regex = re.compile('[^a-z\s]')
+            doc = regex.sub(" ", doc)
+            # doc = re.sub(r"\[\*\*.*\*\*\]", "", doc)
+            # doc = nlp(doc)
+            tlist = []
+            doc = doc.split()
+            for token in doc:
+                text = token.strip()
+                # if text != "" and text not in special_token_to_ignore:
+                if text != "":
+                    counter[text] += 1
+                tlist.append(text)
+            doc_list.append(tlist)
+
+        word_counts = [x for x in counter.items() if x[1] >= 1]
+        word_counts.sort(key=lambda x: x[1], reverse=True)
+        word_counts = word_counts[:most_common + 1]
+        word_counts = dict([(w[0], w[1]) for w in word_counts])
+        for t in special_token_to_ignore + white_space:
+            assert t not in word_counts
+
+        with open(vocab_file, 'w') as out_vocab_file:
+            for word in word_counts:
+                out_vocab_file.write(word + "\n")
+        print("Vocab saved to %s" % vocab_file)
+
+        new_doc_list = []
+        print("Cleaning the original data ...")
+        for doc in tqdm(doc_list[:]):
+            token_list = []
+            for token in doc:
+                text = token.strip()
+                if text == "":
+                    pass
+                elif text in word_counts:
+                    token_list.append(text)
+                else:
+                    token_list.append("[UNK]")
+            new_doc = ""
+            for tidx, token in enumerate(token_list):
+                new_doc += token
+                if (tidx + 1) % sentence_length == 0:
+                    new_doc += "\n"
+                elif tidx < len(token_list) - 1:
+                    new_doc += " "
+            if not new_doc.endswith("\n"):
+                new_doc += "\n"
+
+            new_doc_list.append(new_doc)
+
+        with open(text_corpus_file, 'w') as out_corpus_file:
+            for doc in new_doc_list:
+                out_corpus_file.write(doc + "==DOCSPLIT==\n")
+        print("Corpus saved to %s" % text_corpus_file)
+
+        text_data = new_doc_list
+
     else:
         with open(text_corpus_file, 'r') as infile:
             text_data = infile.read()
+        print("Corpus loaded from %s" % text_corpus_file)
 
+        text_data = text_data.split("==DOCSPLIT==\n")
+
+    # TODO: return vocab
     return text_data
 
 if __name__ == "__main__":
@@ -230,4 +294,6 @@ if __name__ == "__main__":
     # plot_hpo_ontology(data)
     # load_hpo_description()
     # load_mimic()
-    get_corpus()
+    data = get_corpus()
+    print(data[0])
+    print(len(data))
