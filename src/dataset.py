@@ -1,11 +1,15 @@
 
+import re
 import random
+import numpy as np
 from tqdm import tqdm
 import torch
+import pickle
 from torch.utils.data import Dataset
 
 import config
 from log import logger
+import dataloader
 
 # The code is modified and rewritten based on
 # https://github.com/huggingface/pytorch-pretrained-BERT/blob/master/examples/run_lm_finetuning.py
@@ -28,6 +32,8 @@ class BERTDataset(Dataset):
         self.all_docs = []
         print("Initializing the dataset for training ...")
         for doc in tqdm(corpus_data):
+            if len(doc) == 0:
+                continue
             lines = doc.split("\n")
             tdoc = []
             for line in lines:
@@ -41,6 +47,7 @@ class BERTDataset(Dataset):
                 self.sample_to_doc.append(sample)
             # the last sentence of a doc should be removed as there wont be a subsequent sentence anymore
             self.sample_to_doc.pop()
+            assert len(tdoc) > 0
             self.all_docs.append(tdoc)
 
         self.num_samples = len(self.sample_to_doc)
@@ -102,8 +109,8 @@ class BERTDataset(Dataset):
         assert index < self.num_samples
 
         sample = self.sample_to_doc[index]
-        t1 = self.all_docs[sample["doc_id"]][sample["line"]]
-        t2 = self.all_docs[sample["doc_id"]][sample["line"] + 1]
+        t1 = self.all_docs[sample["doc_id"]][sample["line_id"]]
+        t2 = self.all_docs[sample["doc_id"]][sample["line_id"] + 1]
         # used later to avoid random nextSentence from same doc
         self.current_doc = sample["doc_id"]
 
@@ -126,7 +133,6 @@ class BERTDataset(Dataset):
             if rand_doc_idx != self.current_doc:
                 return line
         raise Exception("Get random line error.")
-
 
 class InputExample(object):
     """A single training/test example for the language model."""
@@ -233,6 +239,7 @@ def convert_example_to_features(example, max_seq_length, tokenizer):
     assert len(segment_ids) == max_seq_length
     assert len(lm_label_ids) == max_seq_length
 
+    '''
     if example.guid < 5:
         logger.info("*** Example ***")
         logger.info("guid: %s" % (example.guid))
@@ -244,6 +251,7 @@ def convert_example_to_features(example, max_seq_length, tokenizer):
             "segment_ids: %s" % " ".join([str(x) for x in segment_ids]))
         logger.info("LM label: %s " % (lm_label_ids))
         logger.info("Is next sentence label: %s " % (example.is_next))
+    '''
 
     features = InputFeatures(input_ids=input_ids,
                              input_mask=input_mask,
@@ -305,3 +313,249 @@ def _truncate_seq_pair(tokens_a, tokens_b, max_length):
             tokens_a.pop()
         else:
             tokens_b.pop()
+
+class HPOAnnotate4TrainingDataset(Dataset):
+    def __init__(self, hpodata, tokenizer, seq_len=config.sequence_length):
+
+        self.vocab = tokenizer.vocab
+        self.tokenizer = tokenizer
+        self.seq_len = seq_len
+
+        self.hpodata = hpodata
+
+        self.sentence_dict = dict()
+        self.sentence_list = list()
+
+        self.hpo_dict = dict()
+        self.hpo_list = list()
+
+        # for training only
+        # create a complete index for all sentences
+        for hpoid in self.hpodata:
+            for sentence in self.hpodata[hpoid]['mimic_train']:
+                if sentence in self.sentence_dict:
+                    continue
+                assert sentence.replace("[UNK]", "").islower()
+                assert sentence not in self.sentence_dict
+                self.sentence_dict[sentence] = len(self.sentence_list)
+                self.sentence_list.append({
+                    "sentence": sentence,
+                    "hpo_ids": set()
+                })
+            description = self.hpodata[hpoid]['description']
+            # description = self.hpodata[hpoid]['description'].strip().lower()
+            # regex = re.compile('[^a-z\s]')
+            # description = regex.sub(" ", description)
+            # self.hpodata[hpoid]['description'] = description
+            assert description.replace("[UNK]", "").islower()
+            assert description not in self.sentence_dict
+            self.sentence_dict[description] = len(self.sentence_list)
+            self.sentence_list.append({
+                "sentence": description,
+                "hpo_ids": set()
+            })
+
+        print("Processing training dataset for HPO annotation ...")
+        # perform DFS to construct relations between HPO and sentences (HPO -> sentences)
+        self.dfs(dataloader.hpo_root_id, depth=0)
+
+        del self.hpodata
+        # in case anything needs to be changed
+        # with open(dataloader.hpo_dataset_file, 'wb') as f:
+        #     pickle.dump(self.hpodata, f)
+        # exit()
+
+        # construct relations sentences -> HPO
+        for hpo_sample in tqdm(self.hpo_list):
+            hpo_id = hpo_sample['hpo_id']
+            for sentence_id in hpo_sample['sentences_id']:
+                self.sentence_list[sentence_id]["hpo_ids"].add(hpo_id)
+
+        # no sentence should be related to all HPO terms
+        for sentence_sample in self.sentence_list:
+            assert len(sentence_sample["hpo_ids"]) < len(self.hpo_dict)
+
+        assert len(self.hpo_list) == len(self.hpo_dict)
+        assert len(self.sentence_list) == len(self.sentence_dict)
+        print("Number of HPO terms: %d" % len(self.hpo_list))
+        print("Avg number of sentences per HPO: %f" % (np.mean([len(sample["sentences_id"]) for sample in self.hpo_list])))
+        print("Median number of sentences per HPO: %f" % (np.median([len(sample["sentences_id"]) for sample in self.hpo_list])))
+        print("Max number of HPO per sentence: %f" % (np.max([len(sample["hpo_ids"]) for sample in self.sentence_list])))
+        print("Avg number of HPO per sentence: %f" % (np.mean([len(sample["hpo_ids"]) for sample in self.sentence_list])))
+        print("Median number of HPO per sentence: %f" % (np.median([len(sample["hpo_ids"]) for sample in self.sentence_list])))
+        print("Total number of related sentences: %d" % len(self.sentence_list))
+
+    def dfs(self, hpoid, depth):
+
+        if hpoid in self.hpo_dict:
+            return
+
+        # assert 'depth' in self.hpodata[hpoid]
+        # self.hpodata[hpoid]['depth'] = depth
+
+        if self.hpodata[hpoid]['status'] == True:
+            assert hpoid not in self.hpo_dict
+            self.hpo_dict[hpoid] = len(self.hpo_list)
+            self.hpo_list.append({
+                "hpo_id": hpoid,
+                "description_id": self.sentence_dict[self.hpodata[hpoid]['description']],
+                "sentences_id": set([self.sentence_dict[s] for s in self.hpodata[hpoid]['mimic_train']])
+            })
+            self.hpo_list[-1]["sentences_id"].add(self.hpo_list[-1]["description_id"])
+            # sentences of all children nodes should be included as well
+            for child in self.hpodata[hpoid]['children_node']:
+                self.dfs(child, depth + 1)
+                self.hpo_list[self.hpo_dict[hpoid]]["sentences_id"] |= self.hpo_list[self.hpo_dict[child]]["sentences_id"]
+        else:
+            for child in self.hpodata[hpoid]['children_node']:
+                self.dfs(child, depth + 1)
+
+    def __len__(self):
+        return len(self.sentence_list)
+
+    def __getitem__(self, item):
+
+        if random.random() > 0.5:
+            # positive sample
+            hpoid = random.choice(list(self.sentence_list[item]['hpo_ids']))
+            hpo_desc_id = self.hpo_list[self.hpo_dict[hpoid]]['description_id']
+            is_related = 1
+        else:
+            # negative sample
+            while True:
+                hpoid = random.choice(list(self.hpo_dict.keys()))
+                if hpoid not in self.sentence_list[item]['hpo_ids']:
+                    hpo_desc_id = self.hpo_list[self.hpo_dict[hpoid]]['description_id']
+                    break
+            is_related = 0
+
+        sentence = self.sentence_list[item]['sentence']
+        hpo_desc = self.sentence_list[hpo_desc_id]['sentence']
+
+        tokens_a = self.tokenizer.tokenize(sentence)
+        tokens_b = self.tokenizer.tokenize(hpo_desc)
+
+        # combine to one sample
+        cur_example = InputExample4HPOAnnotation(tokens_a=tokens_a, tokens_b=tokens_b, is_related=is_related)
+
+        # transform sample to features
+        cur_features = convert_example_to_features_4_hpo_annotation(cur_example, self.seq_len, self.tokenizer)
+
+        cur_tensors = (torch.tensor(cur_features.input_ids),
+                       torch.tensor(cur_features.input_mask),
+                       torch.tensor(cur_features.segment_ids),
+                       torch.tensor(cur_features.is_related))
+
+        return cur_tensors
+
+
+class InputExample4HPOAnnotation(object):
+    """A single training/test example for the language model."""
+
+    def __init__(self, tokens_a, tokens_b, is_related):
+        """Constructs a InputExample.
+
+        Args:
+            guid: Unique id for the example.
+            tokens_a: string. The untokenized text of the first sequence. For single
+            tokens_b: string. The untokenized text of the second sequence.
+        """
+        self.tokens_a = tokens_a
+        self.tokens_b = tokens_b
+        self.is_related = is_related
+
+class InputFeatures4HPOAnnotation(object):
+    """A single set of features of data."""
+
+    def __init__(self, input_ids, input_mask, segment_ids, is_related):
+        self.input_ids = input_ids
+        self.input_mask = input_mask
+        self.segment_ids = segment_ids
+        self.is_related = is_related
+
+def convert_example_to_features_4_hpo_annotation(example, max_seq_length, tokenizer):
+    """
+    Convert a raw sample (pair of sentences as tokenized strings) into a proper training sample with
+    IDs, LM labels, input_mask, CLS and SEP tokens etc.
+    :param example: InputExample, containing sentence input as strings and is_next label
+    :param max_seq_length: int, maximum length of sequence.
+    :param tokenizer: Tokenizer
+    :return: InputFeatures, containing all inputs and labels of one sample as IDs (as used for model training)
+    """
+    tokens_a = example.tokens_a
+    tokens_b = example.tokens_b
+    # Modifies `tokens_a` and `tokens_b` in place so that the total
+    # length is less than the specified length.
+    # Account for [CLS], [SEP], [SEP] with "- 3"
+    _truncate_seq_pair(tokens_a, tokens_b, max_seq_length - 3)
+
+    # The convention in BERT is:
+    # (a) For sequence pairs:
+    #  tokens:   [CLS] is this jack ##son ##ville ? [SEP] no it is not . [SEP]
+    #  type_ids: 0   0  0    0    0     0       0 0    1  1  1  1   1 1
+    # (b) For single sequences:
+    #  tokens:   [CLS] the dog is hairy . [SEP]
+    #  type_ids: 0   0   0   0  0     0 0
+    #
+    # Where "type_ids" are used to indicate whether this is the first
+    # sequence or the second sequence. The embedding vectors for `type=0` and
+    # `type=1` were learned during pre-training and are added to the wordpiece
+    # embedding vector (and position vector). This is not *strictly* necessary
+    # since the [SEP] token unambigiously separates the sequences, but it makes
+    # it easier for the model to learn the concept of sequences.
+    #
+    # For classification tasks, the first vector (corresponding to [CLS]) is
+    # used as as the "sentence vector". Note that this only makes sense because
+    # the entire model is fine-tuned.
+    tokens = []
+    segment_ids = []
+    tokens.append("[CLS]")
+    segment_ids.append(0)
+    for token in tokens_a:
+        tokens.append(token)
+        segment_ids.append(0)
+    tokens.append("[SEP]")
+    segment_ids.append(0)
+
+    assert len(tokens_b) > 0
+    for token in tokens_b:
+        tokens.append(token)
+        segment_ids.append(1)
+    tokens.append("[SEP]")
+    segment_ids.append(1)
+
+    input_ids = tokenizer.convert_tokens_to_ids(tokens)
+
+    # The mask has 1 for real tokens and 0 for padding tokens. Only real
+    # tokens are attended to.
+    input_mask = [1] * len(input_ids)
+
+    # Zero-pad up to the sequence length.
+    while len(input_ids) < max_seq_length:
+        input_ids.append(0)
+        input_mask.append(0)
+        segment_ids.append(0)
+
+    assert len(input_ids) == max_seq_length
+    assert len(input_mask) == max_seq_length
+    assert len(segment_ids) == max_seq_length
+
+    features = InputFeatures4HPOAnnotation(
+        input_ids=input_ids,
+        input_mask=input_mask,
+        segment_ids=segment_ids,
+        is_related=example.is_related)
+    return features
+
+
+if __name__ == '__main__':
+    pass
+
+
+
+
+
+
+
+
+
