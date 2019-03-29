@@ -74,9 +74,12 @@ class AnnotationSuperModel():
 
         ## create dataset
         corpus_mimic_data, corpus_hpo_data = dataloader.get_corpus()
+        assert len(corpus_mimic_data) == config.total_num_mimic_record
 
         if is_train:
-            train_corpus_mimic = corpus_mimic_data[:int(len(corpus_mimic_data) * config.training_percentage)]
+            # TODO: retrain model
+            # train_corpus_mimic = corpus_mimic_data[:int(len(corpus_mimic_data) * config.training_percentage)]
+            train_corpus_mimic = [corpus_mimic_data[index] for index in config.mimic_train_indices]
             corpus_dataset = BERTDataset(train_corpus_mimic + corpus_hpo_data, self.tokenizer, seq_len=config.sequence_length)
             corpus_sampler = RandomSampler(corpus_dataset)
             corpus_dataloader = DataLoader(corpus_dataset, sampler=corpus_sampler, batch_size=config.train_batch_size)
@@ -86,7 +89,9 @@ class AnnotationSuperModel():
             total_num_epoch = config.train_epoch
 
         else:
-            test_corpus_mimic = corpus_mimic_data[-int(len(corpus_mimic_data) * config.testing_percentage):]
+            # TODO: retest model
+            # test_corpus_mimic = corpus_mimic_data[-int(len(corpus_mimic_data) * config.testing_percentage):]
+            test_corpus_mimic = [corpus_mimic_data[index] for index in config.mimic_test_indices]
             corpus_dataset = BERTDataset(test_corpus_mimic, self.tokenizer, seq_len=config.sequence_length)
             corpus_sampler = RandomSampler(corpus_dataset)
             corpus_dataloader = DataLoader(corpus_dataset, sampler=corpus_sampler, batch_size=config.test_batch_size)
@@ -190,6 +195,7 @@ class AnnotationSuperModel():
         ## datasets and dataloader
         hpodata = dataloader.get_hpo4dataset()
         ann_dataset = HPOAnnotate4TrainingDataset(hpodata, tokenizer=self.tokenizer, seq_len=config.sequence_length)
+        exit()
 
         ann_sampler = RandomSampler(ann_dataset)
         ann_dataloader = DataLoader(ann_dataset, sampler=ann_sampler, batch_size=config.train_batch_size)

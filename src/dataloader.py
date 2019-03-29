@@ -454,10 +454,12 @@ def get_corpus(most_common=config.vocabulary_size, sentence_length=32, rebuild=F
 
         total_num_of_sentence = 0
         for doc in mimic_doc_list:
-            total_num_of_sentence += len(doc)
+            total_num_of_sentence += len(doc.split("\n"))
 
         print("Total num of MIMIC docs: %d" % len(mimic_doc_list))
         print("Total num of MIMIC sentences: %d" % total_num_of_sentence)
+        # Total num of MIMIC docs: 52722
+        # Total num of MIMIC sentences: 2575124
 
         return mimic_doc_list, hpo_doc_list
 
@@ -506,6 +508,8 @@ def get_icd2hpo_mapping():
 
 def get_hpo4dataset():
 
+    # TODO: reprocess this
+    # if True:
     if not os.path.exists(hpo_dataset_file):
         print("Note: This function may take a long time to process. So be patient.")
 
@@ -513,8 +517,11 @@ def get_hpo4dataset():
         hpo_description = load_hpo_description()
 
         corpus_mimic_data, _ = get_corpus()
-        train_corpus_mimic = corpus_mimic_data[:int(len(corpus_mimic_data) * config.training_percentage)]
-        test_corpus_mimic = corpus_mimic_data[-int(len(corpus_mimic_data) * config.testing_percentage):]
+        # train_corpus_mimic = corpus_mimic_data[:int(len(corpus_mimic_data) * config.training_percentage)]
+        # test_corpus_mimic = corpus_mimic_data[-int(len(corpus_mimic_data) * config.testing_percentage):]
+        assert len(corpus_mimic_data) == config.total_num_mimic_record
+        train_corpus_mimic = [corpus_mimic_data[index] for index in config.mimic_train_indices]
+        test_corpus_mimic = [corpus_mimic_data[index] for index in config.mimic_test_indices]
 
         hpo_dataset = dict()
         # hpo_dataset is dict
@@ -570,9 +577,6 @@ def get_hpo4dataset():
                 #             # print(hpo_description[node][hpo_domains[3]])
                 #             # print(hpo_description[node][hpo_domains[4]])
                 #             # print(node)
-
-                hpo_dataset[node]["mimic_train"] = set()
-                hpo_dataset[node]["mimic_test"] = set()
 
                 children = hpo_ontology[node]["relations"].get("can_be", [])
                 for child in children:
@@ -700,13 +704,25 @@ def get_icd_omim_mapping():
 
     return icd_omim_mapping
 
+def get_icd_hpo_silver_mapping():
+    icd2omim = get_icd_omim_mapping()
+    omim2hpo = get_omim_hpo_mapping()
+    icd2hpo = dict()
+    for icd in icd2omim:
+        for omim in icd2omim[icd]:
+            if omim in omim2hpo:
+                if icd not in icd2hpo:
+                    icd2hpo[icd] = set()
+                icd2hpo[icd].update(omim2hpo[omim])
+    return icd2hpo
+
 if __name__ == "__main__":
     ## the code here is used to test each function
     # load_hpo_ontology()
     # plot_hpo_ontology(data)
     # load_hpo_description()
     # load_mimic()
-    mimic_data, hpo_data = get_corpus(rebuild=False)
+    # mimic_data, hpo_data = get_corpus(rebuild=False)
     # mimic_data, hpo_data = get_corpus(rebuild=True)
     # print(mimic_data[0])
     # print(hpo_data[0])
@@ -720,7 +736,7 @@ if __name__ == "__main__":
     # get_disease2hpo_mapping()
     # get_icd2hpo_mapping()
 
-    # hpodata = get_hpo4dataset()
+    hpodata = get_hpo4dataset()
     # test_len = []
     # train_len = []
     # for key in hpodata:

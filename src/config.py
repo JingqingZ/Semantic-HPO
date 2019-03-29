@@ -21,8 +21,18 @@ training_percentage = 0.7
 testing_percentage = 0.3
 assert training_percentage + testing_percentage == 1
 
+import numpy as np
+total_num_mimic_record = 52722
+np.random.seed(41) # the seed is the average of four numbers (1-100) randomly selected by my friends
+mimic_indices = np.arange(total_num_mimic_record)
+np.random.shuffle(mimic_indices)
+
+mimic_train_indices = mimic_indices[:int(total_num_mimic_record * training_percentage)]
+mimic_test_indices = mimic_indices[-int(total_num_mimic_record * testing_percentage):]
+
 outputs_dir = "../outputs/"
 outputs_model_dir = outputs_dir + "models/"
+outputs_results_dir = outputs_dir + "results/"
 
 special_tokens_in_vocab = ["[PAD]", "[CLS]", "[UNK]", "[SEP]", "[MASK]"]
 
@@ -31,15 +41,5 @@ if not os.path.exists(outputs_dir):
     os.makedirs(outputs_dir)
 if not os.path.exists(outputs_model_dir):
     os.makedirs(outputs_model_dir)
-
-
-## Some statictis:
-# Total num of MIMIC docs: 52722
-# Total num of MIMIC sentences: 483598154
-# Number of HPO terms: 13993
-# Avg number of sentences per HPO: 1215.436147
-# Median number of sentences per HPO: 1.000000
-# Max number of HPO per sentence: 93.000000
-# Avg number of HPO per sentence: 12.020353
-# Median number of HPO per sentence: 10.000000
-# Total number of related sentences: 1414900
+if not os.path.exists(outputs_results_dir):
+    os.makedirs(outputs_results_dir)

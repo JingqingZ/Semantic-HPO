@@ -334,13 +334,16 @@ class HPOAnnotate4TrainingDataset(Dataset):
         for hpoid in self.hpodata:
             for sentence in self.hpodata[hpoid]['mimic_train']:
                 if sentence in self.sentence_dict:
+                    sentence_id = self.sentence_dict[sentence]
+                    self.sentence_list[sentence_id]['hpo_ids'].add(hpoid)
                     continue
                 assert sentence.replace("[UNK]", "").islower()
+                assert len(sentence) > 0
                 assert sentence not in self.sentence_dict
                 self.sentence_dict[sentence] = len(self.sentence_list)
                 self.sentence_list.append({
                     "sentence": sentence,
-                    "hpo_ids": set()
+                    "hpo_ids": {hpoid}
                 })
             description = self.hpodata[hpoid]['description']
             # description = self.hpodata[hpoid]['description'].strip().lower()
@@ -352,7 +355,7 @@ class HPOAnnotate4TrainingDataset(Dataset):
             self.sentence_dict[description] = len(self.sentence_list)
             self.sentence_list.append({
                 "sentence": description,
-                "hpo_ids": set()
+                "hpo_ids": {hpoid}
             })
 
         print("Processing training dataset for HPO annotation ...")
@@ -372,8 +375,10 @@ class HPOAnnotate4TrainingDataset(Dataset):
                 self.sentence_list[sentence_id]["hpo_ids"].add(hpo_id)
 
         # no sentence should be related to all HPO terms
+        # every sentence should be related to at least one HPO term
         for sentence_sample in self.sentence_list:
             assert len(sentence_sample["hpo_ids"]) < len(self.hpo_dict)
+            assert len(sentence_sample["hpo_ids"]) > 0
 
         assert len(self.hpo_list) == len(self.hpo_dict)
         assert len(self.sentence_list) == len(self.sentence_dict)
@@ -384,6 +389,13 @@ class HPOAnnotate4TrainingDataset(Dataset):
         print("Avg number of HPO per sentence: %f" % (np.mean([len(sample["hpo_ids"]) for sample in self.sentence_list])))
         print("Median number of HPO per sentence: %f" % (np.median([len(sample["hpo_ids"]) for sample in self.sentence_list])))
         print("Total number of related sentences: %d" % len(self.sentence_list))
+        # Number of HPO terms: 13993
+        # Avg number of sentences per HPO: 1215.436147
+        # Median number of sentences per HPO: 1.000000
+        # Max number of HPO per sentence: 93.000000
+        # Avg number of HPO per sentence: 12.020353
+        # Median number of HPO per sentence: 10.000000
+        # Total number of related sentences: 1414900
 
     def dfs(self, hpoid, depth):
 
@@ -399,7 +411,7 @@ class HPOAnnotate4TrainingDataset(Dataset):
             self.hpo_list.append({
                 "hpo_id": hpoid,
                 "description_id": self.sentence_dict[self.hpodata[hpoid]['description']],
-                "sentences_id": set([self.sentence_dict[s] for s in self.hpodata[hpoid]['mimic_train']])
+                "sentences_id": set([self.sentence_dict[s] for s in self.hpodata[hpoid]['mimic_train']]) # only train data will be included
             })
             self.hpo_list[-1]["sentences_id"].add(self.hpo_list[-1]["description_id"])
             # sentences of all children nodes should be included as well
@@ -447,7 +459,6 @@ class HPOAnnotate4TrainingDataset(Dataset):
                        torch.tensor(cur_features.is_related))
 
         return cur_tensors
-
 
 class InputExample4HPOAnnotation(object):
     """A single training/test example for the language model."""
@@ -546,7 +557,6 @@ def convert_example_to_features_4_hpo_annotation(example, max_seq_length, tokeni
         segment_ids=segment_ids,
         is_related=example.is_related)
     return features
-
 
 if __name__ == '__main__':
     pass
