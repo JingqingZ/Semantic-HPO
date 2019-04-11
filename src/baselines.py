@@ -11,8 +11,8 @@ keyword_search_results_file = config.outputs_results_dir + "keyword_search.csv"
 
 def silver_standard():
 
-    #  if not os.path.exists(silver_standard_results_file):
-    if True:
+    if not os.path.exists(silver_standard_results_file):
+    # if True:
         mimic_data = dataloader.load_mimic()
         icd2omim = dataloader.get_icd_omim_mapping()
         omim2hpo = dataloader.get_omim_hpo_mapping()
@@ -30,6 +30,19 @@ def silver_standard():
         print("Avg HPO per OMIM: %.f" % np.mean([len(omim2hpo[omim]) for omim in omim2hpo]))
         print("Med HPO per OMIM: %.f" % np.median([len(omim2hpo[omim]) for omim in omim2hpo]))
         print("Min HPO per OMIM: %.f" % np.min([len(omim2hpo[omim]) for omim in omim2hpo]))
+        # Max OMIM per ICD: 63                                                                                                  │·····················································································
+        # Q95 OMIM per ICD: 13                                                                                                  │·····················································································
+        # Q90 OMIM per ICD: 9                                                                                                   │·····················································································
+        # Avg OMIM per ICD: 4                                                                                                   │·····················································································
+        # Med OMIM per ICD: 2                                                                                                   │·····················································································
+        # Min OMIM per ICD: 1                                                                                                   │·····················································································
+        # ---                                                                                                                   │·····················································································
+        # Max HPO per OMIM: 127                                                                                                 │·····················································································
+        # Q95 HPO per OMIM: 37                                                                                                  │·····················································································
+        # Q90 HPO per OMIM: 28                                                                                                  │·····················································································
+        # Avg HPO per OMIM: 13                                                                                                  │·····················································································
+        # Med HPO per OMIM: 9                                                                                                   │·····················································································
+        # Min HPO per OMIM: 1
 
         # icd2hpo = dataloader.get_icd_hpo_silver_mapping()
         icd2hpo = dataloader.get_icd_hpo_in_limited_hpo_set(dataloader.hpo_phenotypic_abnormality_id)
@@ -40,6 +53,12 @@ def silver_standard():
         print("Avg HPO per ICD: %.f" % np.mean([len(icd2hpo[icd]) for icd in icd2hpo]))
         print("Med HPO per ICD: %.f" % np.median([len(icd2hpo[icd]) for icd in icd2hpo]))
         print("Min HPO per ICD: %.f" % np.min([len(icd2hpo[icd]) for icd in icd2hpo]))
+        # Max HPO per ICD: 20                                                                                                   │·····················································································
+        # Q95 HPO per ICD: 16                                                                                                   │·····················································································
+        # Q90 HPO per ICD: 14                                                                                                   │·····················································································
+        # Avg HPO per ICD: 8                                                                                                    │·····················································································
+        # Med HPO per ICD: 8                                                                                                    │·····················································································
+        # Min HPO per ICD: 0
 
         def icd2hpo_mapping(icdstr):
             icd_list = icdstr.split("/")
@@ -164,9 +183,24 @@ def keyword_search():
         mimic_data['HPO_CODE_LIST_KEYWORD_SEARCH_WITH_PARENT'] = mimic_data['CLEAN_TEXT'].apply(text_to_hpo_by_keyword_with_parent)
         mimic_data['HPO_CODE_LIST_KEYWORD_SEARCH_WITHOUT_PARENT'] = mimic_data['CLEAN_TEXT'].apply(text_to_hpo_by_keyword_without_parent)
 
+        root_node = dataloader.hpo_phenotypic_abnormality_id
+        hpo_onto = dataloader.load_hpo_ontology()
+        hpo_predecessors_node = hpo_onto[root_node]["relations"].get("can_be", [])
+
+        def keep_predecessors_only(text):
+            if not isinstance(text, str) or len(text) == 0:
+                return ''
+            hpolist = text.split("/")
+            nhpolist = [hpo for hpo in hpolist if hpo in hpo_predecessors_node]
+            hpostr = "/".join(nhpolist)
+            return hpostr
+
+        mimic_data['HPO_CODE_LIST_KEYWORD_SEARCH_PREDECESSORS_ONLY'] = mimic_data['HPO_CODE_LIST_KEYWORD_SEARCH_WITH_PARENT'].apply(keep_predecessors_only)
+
         mimic_data = mimic_data[["ICD9_CODE_LIST",
                                  "HPO_CODE_LIST_KEYWORD_SEARCH_WITH_PARENT",
                                  "HPO_CODE_LIST_KEYWORD_SEARCH_WITHOUT_PARENT",
+                                 "HPO_CODE_LIST_KEYWORD_SEARCH_PREDECESSORS_ONLY",
                                  "CLEAN_TEXT"]]
         mimic_data.to_csv(keyword_search_results_file)
 
@@ -189,6 +223,7 @@ def topic_model():
 
 if __name__ == '__main__':
 
+    '''
     mimic_data = silver_standard()
     hpo_list = mimic_data["HPO_CODE_LIST"].tolist()
     print("Num of EHR has HPO %d/%d" % (np.sum([1 for hstr in hpo_list if not isinstance(hstr, float) and len(hstr) > 0]), len(hpo_list)))
@@ -196,14 +231,29 @@ if __name__ == '__main__':
     print("Median HPO for all %.f" % np.median([len([h for h in hstr.split("/") if len(h) > 0]) if isinstance(hstr, str) else 0 for hstr in hpo_list]))
     print("Avg HPO for those have %.f" % np.mean([len([h for h in hstr.split("/") if len(h) > 0]) for hstr in hpo_list if not isinstance(hstr, float) and len(hstr) > 0]))
     print("Median HPO for those have %.f" % np.median([len([h for h in hstr.split("/") if len(h) > 0]) for hstr in hpo_list if not isinstance(hstr, float) and len(hstr) > 0]))
+    '''
+    # ALL HPO
     # Num of EHR has HPO 27980/52722
     # Avg HPO for all 8
     # Median HPO for all 5
     # Avg HPO for those have 15
     # Median HPO for those have 12
+    # LIMITED HPO (direct children of HP:0000118)
+    # Num of EHR has HPO 27980/52722                                                                                        │·····················································································
+    # Avg HPO for all 3                                                                                                     │·····················································································
+    # Median HPO for all 4                                                                                                  │·····················································································
+    # Avg HPO for those have 6                                                                                              │·····················································································
+    # Median HPO for those have 5
+
+    mimic_data = keyword_search()
+    hpo_list = mimic_data['HPO_CODE_LIST_KEYWORD_SEARCH_PREDECESSORS_ONLY'].to_list()
+    print("Num of EHR has HPO %d/%d" % (np.sum([1 for hstr in hpo_list if not isinstance(hstr, float) and len(hstr) > 0]), len(hpo_list)))
+    print("Avg HPO for all %.f" % np.mean([len([h for h in hstr.split("/") if len(h) > 0]) if isinstance(hstr, str) else 0 for hstr in hpo_list]))
+    print("Median HPO for all %.f" % np.median([len([h for h in hstr.split("/") if len(h) > 0]) if isinstance(hstr, str) else 0 for hstr in hpo_list]))
+    print("Avg HPO for those have %.f" % np.mean([len([h for h in hstr.split("/") if len(h) > 0]) for hstr in hpo_list if not isinstance(hstr, float) and len(hstr) > 0]))
+    print("Median HPO for those have %.f" % np.median([len([h for h in hstr.split("/") if len(h) > 0]) for hstr in hpo_list if not isinstance(hstr, float) and len(hstr) > 0]))
 
     '''
-    mimic_data = keyword_search()
     hpo_list = mimic_data["HPO_CODE_LIST_KEYWORD_SEARCH_WITH_PARENT"].tolist()
     print("Num of EHR has HPO %d/%d" % (np.sum([1 for hstr in hpo_list if not isinstance(hstr, float) and len(hstr) > 0]), len(hpo_list)))
     print("Avg HPO for all %.f" % np.mean([len([h for h in hstr.split("/") if len(h) > 0]) if isinstance(hstr, str) else 0 for hstr in hpo_list]))
