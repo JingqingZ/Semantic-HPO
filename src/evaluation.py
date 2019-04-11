@@ -47,7 +47,6 @@ def jaccard(list_of_set1, list_of_set2):
 
             score_dict[i] = overlap
 
-    '''
     sorted_score = sorted(score_dict.items(), key=lambda kv: kv[1])
 
     # worst case
@@ -65,7 +64,7 @@ def jaccard(list_of_set1, list_of_set2):
         print(list_of_set1[sorted_score[-i][0]].split("/"))
         print(list_of_set2[sorted_score[-i][0]].split("/"))
         print("---")
-    '''
+    exit()
 
     print("Total num of records: %d" % len(list_of_set1))
     print("Total num of valid comparison: %d" % len(overlap_list))
@@ -129,6 +128,8 @@ def evaluate_keyword_search_subset_hpo_with_jaccard():
             filtered_hpostr = "/".join(filtered_hpolist)
             filtered_keyword.append(filtered_hpostr)
 
+    # TODO: remove comments
+    '''
     jaccard(
         [silver[index] for index in config.mimic_train_indices],
         [filtered_keyword[index] for index in config.mimic_train_indices],
@@ -142,13 +143,16 @@ def evaluate_keyword_search_subset_hpo_with_jaccard():
     )
 
     print("-----")
+    '''
 
     jaccard(
         silver, filtered_keyword
     )
 
 if __name__ == '__main__':
-    evaluate_keyword_search_all_hpo_with_overlapping_cofficient()
+
+    # evaluate_keyword_search_all_hpo_with_overlapping_cofficient()
+
     # WITHOUT propagation to parent HPO ndoes
     # Training set
     # Total num of records: 36905

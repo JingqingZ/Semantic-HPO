@@ -54,7 +54,7 @@ icd2omim_file = data_dir + "HPO/icd2omim.json"
 mimic_file = data_dir + "MIMIC/ready.csv"
 # created get_corpus()
 text_corpus_mimic_file = data_dir + "corpus_mimic.txt"
-text_corpus_hpo_file = data_dir + "corpus_hpo.txt"
+text_corpus_hpo_file = data_dir + "corpus_hpo.json"
 # created get_vocab()
 vocab_file = data_dir + "vocab.txt"
 vocab_for_analysis_file = data_dir + "vocab4analysis.csv"
@@ -72,6 +72,7 @@ hpo_domains = [
 ]
 
 hpo_root_id = "HP:0000001"
+hpo_phenotypic_abnormality_id = "HP:0000118"
 
 def load_hpo_ontology():
     print("Loading HPO ontology ...")
@@ -79,7 +80,7 @@ def load_hpo_ontology():
     data = json.loads(ont.json)
     return data
 
-def load_hpo_description():
+def load_hpo_raw_description():
     import queue
 
     if not os.path.exists(hpo_description_file):
@@ -124,11 +125,12 @@ def load_hpo_description():
 
     return data
 
+# deprecated
 def convert_hpo_to_docs():
     print("Converting HPO descriptions to documents ...")
 
     ontology = load_hpo_ontology()
-    description = load_hpo_description()
+    description = load_hpo_raw_description()
 
     docs = list()
 
@@ -149,6 +151,18 @@ def convert_hpo_to_docs():
     dfs(hpo_root_id, "")
 
     return docs
+
+def convert_hpo_to_flat_description():
+
+    description = load_hpo_raw_description()
+
+    new_desc_dict = dict()
+
+    for node in description:
+        desc_of_node = " ".join([description[node][d] for d in hpo_domains])
+        new_desc_dict[node] = desc_of_node
+
+    return new_desc_dict
 
 def plot_hpo_ontology():
 
@@ -258,8 +272,7 @@ def load_mimic():
 
     return result
 
-# TODO include hpo descirption into the corpus and vocab
-def get_corpus(most_common=config.vocabulary_size, sentence_length=32, rebuild=False):
+def get_corpus(most_common=config.vocabulary_size, sentence_length=config.sequence_length // 2, rebuild=False):
 
     from collections import Counter
     from tqdm import tqdm
@@ -297,25 +310,24 @@ def get_corpus(most_common=config.vocabulary_size, sentence_length=32, rebuild=F
                 tlist.append(text)
             mimic_doc_list.append(tlist)
 
-        hpo_data = convert_hpo_to_docs()
-        hpo_doc_list = []
+        # hpo_data = convert_hpo_to_docs()
+        hpo_data = convert_hpo_to_flat_description()
+        hpo_doc_dict = dict()
         print("Processing the HPO data and creating vocabulary ...")
-        for doc in tqdm(hpo_data[:]):
-            s_list = []
-            for sentence in doc:
-                sentence = sentence.lower()
-                regex = re.compile('[^a-z\s]')
-                sentence = regex.sub(" ", sentence)
-                s_list.append(sentence)
+        for node in tqdm(hpo_data):
+            sentence = hpo_data[node]
+            sentence = sentence.lower()
+            regex = re.compile('[^a-z\s]')
+            sentence = regex.sub(" ", sentence)
 
-                tokens = sentence.split()
-                for token in tokens:
-                    text = token.strip()
-                    if text != "":
-                        counter[text] += 1
-                        counter_hpo[text] += 1
+            tokens = sentence.split()
+            for token in tokens:
+                text = token.strip()
+                if text != "":
+                    counter[text] += 1
+                    counter_hpo[text] += 1
 
-            hpo_doc_list.append(s_list)
+            hpo_doc_dict[node] = sentence
 
         # get most frequent words
         # all words in hpo will be included in vocab
@@ -399,26 +411,23 @@ def get_corpus(most_common=config.vocabulary_size, sentence_length=32, rebuild=F
             clean_mimic_doc_list.append(new_doc)
 
         print("Cleaning the HPO data ...")
-        clean_hpo_doc_list = list()
-        for doc in tqdm(hpo_doc_list[:]):
-            s_list = []
-            for sentence in doc:
-                token_list = []
-                tokens = sentence.split()
-                for token in tokens:
-                    text = token.strip()
-                    if text == "":
-                        pass
-                    elif text in word_counts:
-                        token_list.append(text)
-                    else:
-                        token_list.append("[UNK]")
-                new_sentence = " ".join(token_list)
-                s_list.append(new_sentence)
-            new_doc = "\n".join(s_list)
-            if not new_doc.endswith("\n"):
-                new_doc += "\n"
-            clean_hpo_doc_list.append(new_doc)
+        clean_hpo_doc_dict = dict()
+        for node in tqdm(hpo_doc_dict):
+            sentence = hpo_doc_dict[node]
+
+            token_list = []
+            tokens = sentence.split()
+            for token in tokens:
+                text = token.strip()
+                if text == "":
+                    pass
+                elif text in word_counts:
+                    token_list.append(text)
+                else:
+                    token_list.append("[UNK]")
+            new_sentence = " ".join(token_list)
+
+            clean_hpo_doc_dict[node] = new_sentence
 
         with open(text_corpus_mimic_file, 'w') as out_corpus_file:
             for doc in clean_mimic_doc_list:
@@ -426,8 +435,7 @@ def get_corpus(most_common=config.vocabulary_size, sentence_length=32, rebuild=F
         print("Corpus of MIMIC saved to %s" % text_corpus_mimic_file)
 
         with open(text_corpus_hpo_file, 'w') as out_corpus_file:
-            for doc in clean_hpo_doc_list:
-                out_corpus_file.write(doc + "==DOCSPLIT==\n")
+            json.dump(clean_hpo_doc_dict, out_corpus_file)
         print("Corpus of HPO saved to %s" % text_corpus_hpo_file)
 
         assert mimic_data.shape[0] == len(mimic_doc_list)
@@ -435,33 +443,28 @@ def get_corpus(most_common=config.vocabulary_size, sentence_length=32, rebuild=F
         mimic_data.to_csv(mimic_file)
         print("Update %s with cleaned text" % mimic_file)
 
-        return clean_mimic_doc_list, clean_hpo_doc_list
-
     else:
         with open(text_corpus_mimic_file, 'r') as infile:
-            mimic_doc_list = infile.read()
+            clean_mimic_doc_list = infile.read()
         print("Corpus of MIMIC loaded from %s" % text_corpus_mimic_file)
-        mimic_doc_list = mimic_doc_list.split("==DOCSPLIT==\n")
-        if len(mimic_doc_list[-1].strip()) == 0:
-            mimic_doc_list = mimic_doc_list[:-1]
+        clean_mimic_doc_list = clean_mimic_doc_list.split("==DOCSPLIT==\n")
+        if len(clean_mimic_doc_list[-1].strip()) == 0:
+            clean_mimic_doc_list = clean_mimic_doc_list[:-1]
 
         with open(text_corpus_hpo_file, 'r') as infile:
-            hpo_doc_list = infile.read()
+            clean_hpo_doc_dict = json.load(infile)
         print("Corpus of HPO loaded from %s" % text_corpus_hpo_file)
-        hpo_doc_list = hpo_doc_list.split("==DOCSPLIT==\n")
-        if len(hpo_doc_list[-1].strip()) == 0:
-            hpo_doc_list = hpo_doc_list[:-1]
 
         total_num_of_sentence = 0
-        for doc in mimic_doc_list:
+        for doc in clean_mimic_doc_list:
             total_num_of_sentence += len(doc.split("\n"))
 
-        print("Total num of MIMIC docs: %d" % len(mimic_doc_list))
+        print("Total num of MIMIC docs: %d" % len(clean_mimic_doc_list))
         print("Total num of MIMIC sentences: %d" % total_num_of_sentence)
         # Total num of MIMIC docs: 52722
         # Total num of MIMIC sentences: 2575124
 
-        return mimic_doc_list, hpo_doc_list
+    return clean_mimic_doc_list, clean_hpo_doc_dict
 
 def get_raredisease2hpo_mapping():
 
@@ -508,15 +511,13 @@ def get_icd2hpo_mapping():
 
 def get_hpo4dataset():
 
-    # TODO: reprocess this
-    # if True:
     if not os.path.exists(hpo_dataset_file):
         print("Note: This function may take a long time to process. So be patient.")
 
         hpo_ontology = load_hpo_ontology()
-        hpo_description = load_hpo_description()
+        hpo_raw_description = load_hpo_raw_description()
 
-        corpus_mimic_data, _ = get_corpus()
+        corpus_mimic_data, hpo_description = get_corpus()
         # train_corpus_mimic = corpus_mimic_data[:int(len(corpus_mimic_data) * config.training_percentage)]
         # test_corpus_mimic = corpus_mimic_data[-int(len(corpus_mimic_data) * config.testing_percentage):]
         assert len(corpus_mimic_data) == config.total_num_mimic_record
@@ -543,10 +544,11 @@ def get_hpo4dataset():
             def dfs(node, depth):
                 pbar.update(len(hpo_dataset))
 
-                desc_of_node = " ".join([hpo_description[node][d] for d in hpo_domains])
-                desc_of_node = desc_of_node.strip().lower()
-                regex = re.compile('[^a-z\s]')
-                desc_of_node = regex.sub(" ", desc_of_node)
+                # desc_of_node = " ".join([hpo_description[node][d] for d in hpo_domains])
+                # desc_of_node = desc_of_node.strip().lower()
+                # regex = re.compile('[^a-z\s]')
+                # desc_of_node = regex.sub(" ", desc_of_node)
+                desc_of_node = hpo_description[node]
 
                 # assert hpo is a tree
                 if node in hpo_dataset:
@@ -560,23 +562,13 @@ def get_hpo4dataset():
                 hpo_dataset[node]["children_node"] = set()
 
                 related_terms = set()
-                related_terms.add(hpo_description[node]["name"].lower())
+                related_terms.add(hpo_raw_description[node]["name"].lower())
                 related_terms.update([t for t in [term.strip().lower() for term in hpo_ontology[node].get('other', {}).get('hasExactSynonym', [])] if len(t) != 0]) # not empty str
                 related_terms.update([t for t in [term.strip().lower() for term in hpo_ontology[node].get('other', {}).get('hasRelatedSynonym', [])] if len(t) != 0]) # no emtpy str
                 hpo_dataset[node]["terms"] = related_terms
 
                 hpo_dataset[node]['mimic_train'] = set()
                 hpo_dataset[node]['mimic_test'] = set()
-
-                # if hpo_dataset[node]['status']:
-                #     for term in hpo_dataset[node]['terms']:
-                #         if len(term) <= 3:
-                #             print(node, term)
-                #             print(related_terms)
-                #             # print(hpo_description[node][hpo_domains[0]])
-                #             # print(hpo_description[node][hpo_domains[3]])
-                #             # print(hpo_description[node][hpo_domains[4]])
-                #             # print(node)
 
                 children = hpo_ontology[node]["relations"].get("can_be", [])
                 for child in children:
@@ -716,16 +708,54 @@ def get_icd_hpo_silver_mapping():
                 icd2hpo[icd].update(omim2hpo[omim])
     return icd2hpo
 
+# if root_node == 'HP:0000118'
+# only the direct children nodes of 'HP:0000118' will be considered in all annotation
+def get_icd_hpo_in_limited_hpo_set(root_node):
+    hpo_data = get_hpo4dataset()
+    hpo_onto = load_hpo_ontology()
+    seed_node = hpo_onto[root_node]["relations"].get("can_be", [])
+
+    node_mapping = dict()
+    for s in seed_node:
+        successors = hpo_data[s]["children_node"]
+        for c in successors:
+            # assert c not in node_mapping
+            if c not in node_mapping:
+                node_mapping[c] = set()
+            node_mapping[c].add(s)
+
+    icd2hpo = get_icd_hpo_silver_mapping()
+    new_icd2hpo = dict()
+
+    for icd in icd2hpo:
+        new_icd2hpo[icd] = set()
+        for hpo in icd2hpo[icd]:
+            if hpo in node_mapping:
+                new_icd2hpo[icd].update(node_mapping[hpo])
+
+    return new_icd2hpo
+
+def get_sentence_list_mimic(mimic_corpus_data):
+    sentences_list = list()
+    for doc in tqdm(mimic_corpus_data):
+        if len(doc) == 0:
+            continue
+        lines = doc.split("\n")
+        sentences_list += [l for l in lines if len(l) > 0]
+    return sentences_list
+
+
 if __name__ == "__main__":
     ## the code here is used to test each function
     # load_hpo_ontology()
     # plot_hpo_ontology(data)
-    # load_hpo_description()
+    # hpo_desc = load_hpo_description()
+    # hpo_desc = convert_hpo_to_flat_description()
     # load_mimic()
     # mimic_data, hpo_data = get_corpus(rebuild=False)
     # mimic_data, hpo_data = get_corpus(rebuild=True)
     # print(mimic_data[0])
-    # print(hpo_data[0])
+    # print(hpo_data['HP:0001804'])
     # for d in data[-50000:]:
     #     if '[UNK]' in d:
     #        print(d)
@@ -736,7 +766,7 @@ if __name__ == "__main__":
     # get_disease2hpo_mapping()
     # get_icd2hpo_mapping()
 
-    hpodata = get_hpo4dataset()
+    # hpodata = get_hpo4dataset()
     # test_len = []
     # train_len = []
     # for key in hpodata:
@@ -755,6 +785,25 @@ if __name__ == "__main__":
 
     # omim_hpo = get_omim_hpo_mapping()
     # icd2omim = get_icd_omim_mapping()
+
+    # icd2hpo = get_icd_hpo_silver_mapping()
+    # hpo_subset = set()
+    # for icd in icd2hpo:
+    #     hpo_subset.update(icd2hpo[icd])
+    # print(hpo_subset)
+    # print(len(icd2hpo))
+    # print(len(hpo_subset))
+
+    new_icd2hpo = get_icd_hpo_in_limited_hpo_set("HP:0000118")
+    print(new_icd2hpo)
+    print(len(new_icd2hpo)) # 98
+    hpo_set = set()
+    for icd in new_icd2hpo:
+        hpo_set.update(new_icd2hpo[icd])
+    print(len(hpo_set)) # 24
+    print(np.mean([len(new_icd2hpo[icd]) for icd in new_icd2hpo])) # 8.102
+
+    pass
 
     # TODO: write a HPCC version of data processing
     pass

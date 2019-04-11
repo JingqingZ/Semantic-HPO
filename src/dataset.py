@@ -14,7 +14,7 @@ import dataloader
 # The code is modified and rewritten based on
 # https://github.com/huggingface/pytorch-pretrained-BERT/blob/master/examples/run_lm_finetuning.py
 class BERTDataset(Dataset):
-    def __init__(self, corpus_data, tokenizer, seq_len=config.sequence_length):
+    def __init__(self, corpus_data, tokenizer, hpo_data=None, hpo_ontology=None, seq_len=config.sequence_length):
         self.vocab = tokenizer.vocab
         self.tokenizer = tokenizer
         self.seq_len = seq_len
@@ -30,7 +30,7 @@ class BERTDataset(Dataset):
         self.sample_to_doc = [] # map sample index to doc and line
 
         self.all_docs = []
-        print("Initializing the dataset for training ...")
+        print("Initializing the MIMIC dataset for training ...")
         for doc in tqdm(corpus_data):
             if len(doc) == 0:
                 continue
@@ -50,17 +50,49 @@ class BERTDataset(Dataset):
             assert len(tdoc) > 0
             self.all_docs.append(tdoc)
 
-        self.num_samples = len(self.sample_to_doc)
+        self.sample_of_hpo = []
+        if hpo_data is not None and hpo_ontology is not None:
+            print("Initializing the HPO dataset for training ...")
+
+            self.hpo_data = hpo_data
+            self.hpo_all_keys = list(hpo_data.keys())
+            self.hpo_connection_mapping = dict()
+
+            t_mapping = dict()
+            def dfs(node):
+                if node in t_mapping:
+                    return
+                children = hpo_ontology[node]["relations"].get("can_be", [])
+                t_mapping[node] = set(children)
+                for child in children:
+                    dfs(child)
+
+            dfs(dataloader.hpo_root_id)
+
+            for node in t_mapping:
+                if len(t_mapping[node]) > 0:
+                    self.hpo_connection_mapping[node] = t_mapping[node]
+
+            for node in tqdm(self.hpo_connection_mapping):
+                for child in self.hpo_connection_mapping[node]:
+                    sample = (node, child)
+                    self.sample_of_hpo.append(sample)
+
+        self.num_samples = len(self.sample_to_doc) + len(self.sample_of_hpo)
         self.num_docs = len(self.all_docs)
 
     def __len__(self):
         return self.num_samples
 
     def __getitem__(self, item):
+
+        if item < len(self.sample_to_doc):
+            t1, t2, is_next_label = self.random_sent(item)
+        else:
+            t1, t2, is_next_label = self.random_hpo(item - len(self.sample_to_doc))
+
         cur_id = self.sample_counter
         self.sample_counter += 1
-
-        t1, t2, is_next_label = self.random_sent(item)
 
         # tokenize
         tokens_a = self.tokenizer.tokenize(t1)
@@ -80,6 +112,7 @@ class BERTDataset(Dataset):
 
         return cur_tensors
 
+
     def random_sent(self, index):
         """
         Get one sample from corpus consisting of two sentences. With prob. 50% these are two subsequent sentences
@@ -98,6 +131,38 @@ class BERTDataset(Dataset):
         assert len(t2) > 0
         return t1, t2, label
 
+    def random_hpo(self, index):
+        """
+        Get one sample consisting of two descriptions of two HPO terms. With prob. 50% these are two subsequent terms in the hierarchy,
+        which means they has a parent-child relation.
+        With 50% the second HPO will be a random one from another branch in the hierarchy.
+        :param index: int, index of sample.
+        :return: (str, str, int), HPO description 1, HPO description 2, isNextSentence Label
+        """
+        assert index < len(self.sample_of_hpo)
+
+        hpo_t1, hpo_t2 = self.sample_of_hpo[index]
+
+        if random.random() > 0.5:
+            label = 0
+        else:
+            for _ in range(100):
+                random_key = random.choice(self.hpo_all_keys)
+                if random_key not in self.hpo_connection_mapping[hpo_t1]:
+                    break
+                if _ == 99:
+                    raise Exception("Cannot randomly pick a HPO term for %s" % hpo_t1)
+            hpo_t2 = random_key
+            label = 1
+
+        assert hpo_t1 in self.hpo_data
+        assert hpo_t2 in self.hpo_data
+
+        desc1 = self.hpo_data[hpo_t1]
+        desc2 = self.hpo_data[hpo_t2]
+
+        return desc1, desc2, label
+
     def get_corpus_line(self, index):
         """
         Get one sample from corpus consisting of a pair of two subsequent lines from the same doc.
@@ -106,7 +171,7 @@ class BERTDataset(Dataset):
         """
         t1 = ""
         t2 = ""
-        assert index < self.num_samples
+        assert index < len(self.sample_to_doc)
 
         sample = self.sample_to_doc[index]
         t1 = self.all_docs[sample["doc_id"]][sample["line_id"]]
@@ -557,6 +622,60 @@ def convert_example_to_features_4_hpo_annotation(example, max_seq_length, tokeni
         segment_ids=segment_ids,
         is_related=example.is_related)
     return features
+
+class SentenceEmbeddingDataset(Dataset):
+    def __init__(self, sentences_list, tokenizer, seq_len=config.sequence_length):
+        self.vocab = tokenizer.vocab
+        self.tokenizer = tokenizer
+        self.seq_len = seq_len
+
+        self.samples = sentences_list
+
+    def __len__(self):
+        return len(self.samples)
+
+    def __getitem__(self, item):
+        text = self.samples[item]
+        tokens_a = self.tokenizer.tokenize(text)
+
+        while True:
+            if len(tokens_a) <= self.seq_len - 2:
+                break
+            else:
+                tokens_a.pop()
+
+        tokens = []
+        segment_ids = []
+        tokens.append("[CLS]")
+        segment_ids.append(0)
+        for token in tokens_a:
+            tokens.append(token)
+            segment_ids.append(0)
+        tokens.append("[SEP]")
+        segment_ids.append(0)
+
+        input_ids = self.tokenizer.convert_tokens_to_ids(tokens)
+
+        input_mask = [1] * len(input_ids)
+
+        # Zero-pad up to the sequence length.
+        while len(input_ids) < self.seq_len:
+            input_ids.append(0)
+            input_mask.append(0)
+            segment_ids.append(0)
+
+        assert len(input_ids) == self.seq_len
+        assert len(input_mask) == self.seq_len
+        assert len(segment_ids) == self.seq_len
+
+        cur_tensors = (torch.tensor(input_ids),
+                       torch.tensor(input_mask),
+                       torch.tensor(segment_ids))
+
+        return cur_tensors
+
+
+
 
 if __name__ == '__main__':
     pass

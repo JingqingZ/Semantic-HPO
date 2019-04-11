@@ -2,6 +2,8 @@
 import os
 import logging
 from tqdm import tqdm, trange
+import numpy as np
+import pickle
 import torch
 from torch.utils.data import DataLoader, Dataset, RandomSampler
 from pytorch_pretrained_bert import BertConfig, BertTokenizer, BertForPreTraining, BertAdam
@@ -10,7 +12,8 @@ from pytorch_pretrained_bert.optimization import warmup_linear
 
 import config
 import dataloader
-from dataset import BERTDataset, HPOAnnotate4TrainingDataset
+from models import BertForSentenceEmbedding
+from dataset import BERTDataset, HPOAnnotate4TrainingDataset, SentenceEmbeddingDataset
 
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s -   %(message)s',
                     datefmt='%m/%d/%Y %H:%M:%S',
@@ -59,7 +62,9 @@ class AnnotationSuperModel():
         if base_step > 0:
             logger.info("** ** * Restoring model from step %d ** ** * " % base_step)
             model_file = os.path.join(config.outputs_model_dir, "pytorch_model_epoch%d.bin" % (base_step))
-            self.bert_model.load_state_dict(torch.load(model_file))
+            state_dict = torch.load(model_file)
+            # state_dict = {key.replace("module.", ""): state_dict[key] for key in state_dict}
+            self.bert_model.load_state_dict(state_dict, strict=True)
 
         ## weights
         weights = list(self.bert_model.named_parameters())
@@ -73,14 +78,15 @@ class AnnotationSuperModel():
             assert base_step > 0
 
         ## create dataset
+        hpo_ontology = dataloader.load_hpo_ontology()
         corpus_mimic_data, corpus_hpo_data = dataloader.get_corpus()
         assert len(corpus_mimic_data) == config.total_num_mimic_record
 
         if is_train:
-            # TODO: retrain model
             # train_corpus_mimic = corpus_mimic_data[:int(len(corpus_mimic_data) * config.training_percentage)]
             train_corpus_mimic = [corpus_mimic_data[index] for index in config.mimic_train_indices]
-            corpus_dataset = BERTDataset(train_corpus_mimic + corpus_hpo_data, self.tokenizer, seq_len=config.sequence_length)
+            corpus_dataset = BERTDataset(train_corpus_mimic, self.tokenizer,
+                                         corpus_hpo_data, hpo_ontology, seq_len=config.sequence_length)
             corpus_sampler = RandomSampler(corpus_dataset)
             corpus_dataloader = DataLoader(corpus_dataset, sampler=corpus_sampler, batch_size=config.train_batch_size)
             total_num_steps = int(
@@ -89,12 +95,12 @@ class AnnotationSuperModel():
             total_num_epoch = config.train_epoch
 
         else:
-            # TODO: retest model
+            del hpo_ontology
+            del corpus_hpo_data
             # test_corpus_mimic = corpus_mimic_data[-int(len(corpus_mimic_data) * config.testing_percentage):]
             test_corpus_mimic = [corpus_mimic_data[index] for index in config.mimic_test_indices]
             corpus_dataset = BERTDataset(test_corpus_mimic, self.tokenizer, seq_len=config.sequence_length)
-            corpus_sampler = RandomSampler(corpus_dataset)
-            corpus_dataloader = DataLoader(corpus_dataset, sampler=corpus_sampler, batch_size=config.test_batch_size)
+            corpus_dataloader = DataLoader(corpus_dataset, batch_size=config.test_batch_size)
             total_num_steps = int(
                 len(corpus_dataset) / config.test_batch_size
             )
@@ -156,6 +162,60 @@ class AnnotationSuperModel():
                     output_model_file = os.path.join(config.outputs_model_dir, "pytorch_model_epoch%d.bin" %
                                                      (base_step + global_step))
                     torch.save(model_to_save.state_dict(), output_model_file)
+
+    def embedding_space_analysis(self, pretrained_base_model, corpus_to_analysis):
+        assert pretrained_base_model > 0
+
+        self.bert_model = BertForSentenceEmbedding(self.bert_config)
+        self.bert_model.to(self.device)
+
+        if self.n_gpu > 1:
+            self.bert_model = torch.nn.DataParallel(self.bert_model)
+
+        logger.info("** ** * Restoring model from step %d ** ** * " % pretrained_base_model)
+        model_file = os.path.join(config.outputs_model_dir, "pytorch_model_epoch%d.bin" % (pretrained_base_model))
+        state_dict = torch.load(model_file)
+        # state_dict = {key.replace("module.", ""): state_dict[key] for key in state_dict}
+        self.bert_model.load_state_dict(state_dict, strict=False)
+
+        whole_corpus_mimic_data, corpus_hpo_data = dataloader.get_corpus()
+        if corpus_to_analysis == 'hpo':
+            hpo_sentences = sorted(corpus_hpo_data.items(), key=lambda k: k[0])
+            sentence_list = [t[1] for t in hpo_sentences]
+        elif corpus_to_analysis == 'train':
+            corpus_mimic = [whole_corpus_mimic_data[index] for index in config.mimic_train_indices]
+            sentence_list = dataloader.get_sentence_list_mimic(corpus_mimic)
+        elif corpus_to_analysis == 'test':
+            corpus_mimic = [whole_corpus_mimic_data[index] for index in config.mimic_test_indices]
+            sentence_list = dataloader.get_sentence_list_mimic(corpus_mimic)
+        elif corpus_to_analysis == 'all':
+            corpus_mimic = [whole_corpus_mimic_data[index] for index in np.append(config.mimic_train_indices, config.mimic_test_indices)]
+            sentence_list = dataloader.get_sentence_list_mimic(corpus_mimic)
+        else:
+            raise ValueError('Invalid argument mimic_corpus_to_analysis.')
+
+        corpus_dataset = SentenceEmbeddingDataset(sentence_list, self.tokenizer, seq_len=config.sequence_length)
+        corpus_dataloader = DataLoader(corpus_dataset, batch_size=config.test_batch_size)
+
+        self.bert_model.eval()
+
+        embedding_list = list()
+        for step, batch in enumerate(tqdm(corpus_dataloader, desc="Iteration")):
+
+            batch = tuple(t.to(self.device) for t in batch)
+            input_ids, input_mask, segment_ids = batch
+            pooled_output = self.bert_model(input_ids, segment_ids, input_mask)
+            embedding_list.append(pooled_output.detach().cpu())
+
+        embedding_list = torch.cat(embedding_list)
+        embedding_list = embedding_list.numpy()
+
+        print("Num of sentences %s" % len(sentence_list))
+        print("Sentence embedding ", embedding_list.shape)
+        with open(config.outputs_results_dir + "mimic_sentence_%s.pickle" % corpus_to_analysis, 'wb') as f:
+            pickle.dump(sentence_list, f)
+        with open(config.outputs_results_dir + "mimic_embedding_%s.npy" % corpus_to_analysis, 'wb') as f:
+            np.save(f, embedding_list)
 
     def annotation_training(self, base_step, pretrained_base_model):
 
@@ -272,22 +332,19 @@ class AnnotationSuperModel():
 
 
 if __name__ == '__main__':
-    # main(base_step=100000, is_train=False) # loss = 12.66, 13.31, 13,32
-    # main(base_step=150000, is_train=False) # loss = 5.03, 4.89, 4.90
-    # main(base_step=180000, is_train=False) # loss = 1.95, 1.97, 1.99
-    # main(base_step=200000, is_train=False) # loss = 1.53, 1.71, 1.74
-    # main(base_step=225000, is_train=False) # loss = 1.42, 1.70, 1.71
-    # main(base_step=250000, is_train=False) # loss = 1.58, 1.57, 1.58
-    # main(base_step=255000, is_train=False) # loss = 1.60, 1.55, 1.57
-    # main(base_step=260000, is_train=False) # loss = 7.87, 7.85, 7.85
-    # main(base_step=275000, is_train=False) # loss = 7.46, 7.57, 7.58
-    # main(base_step=300000, is_train=False) # loss = 8.15, 7.95, 7.94
-    # main(base_step=400000, is_train=False) # loss = 7.85, 7.81, 7.81
-    # main(base_step=500000, is_train=False) # loss = 9.21, 9.30, 9.29
 
     supermodel = AnnotationSuperModel()
+
     # supermodel.pretrain(base_step=0, is_train=True)
-    # supermodel.pretrain(base_step=360000, is_train=False) # loss=1.4337
-    supermodel.annotation_training(base_step=0, pretrained_base_model=360000)
+
+    # supermodel.pretrain(base_step=100000, is_train=False) # loss=1.9213, 1.819 (100 steps)
+    # supermodel.pretrain(base_step=150000, is_train=False) # loss=2.1155, 1.655 (100 steps)
+    # supermodel.pretrain(base_step=200000, is_train=False) # loss=1.7342, 1.534 (100 steps)
+
+    supermodel.embedding_space_analysis(pretrained_base_model=200000, corpus_to_analysis='hpo')
+    # supermodel.embedding_space_analysis(pretrained_base_model=200000, corpus_to_analysis='test')
+    supermodel.embedding_space_analysis(pretrained_base_model=200000, corpus_to_analysis='train')
+
+    # supermodel.annotation_training(base_step=0, pretrained_base_model=360000)
 
     pass
