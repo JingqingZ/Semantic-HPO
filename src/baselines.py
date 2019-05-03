@@ -1,7 +1,7 @@
 import os
 import numpy as np
 import pandas as pd
-from tqdm import tqdm
+from tqdm import tqdm, trange
 
 import dataloader
 import config
@@ -183,9 +183,13 @@ def keyword_search():
         mimic_data['HPO_CODE_LIST_KEYWORD_SEARCH_WITH_PARENT'] = mimic_data['CLEAN_TEXT'].apply(text_to_hpo_by_keyword_with_parent)
         mimic_data['HPO_CODE_LIST_KEYWORD_SEARCH_WITHOUT_PARENT'] = mimic_data['CLEAN_TEXT'].apply(text_to_hpo_by_keyword_without_parent)
 
-        root_node = dataloader.hpo_phenotypic_abnormality_id
-        hpo_onto = dataloader.load_hpo_ontology()
-        hpo_predecessors_node = hpo_onto[root_node]["relations"].get("can_be", [])
+        # root_node = dataloader.hpo_phenotypic_abnormality_id
+        # hpo_onto = dataloader.load_hpo_ontology()
+        # hpo_predecessors_node = hpo_onto[root_node]["relations"].get("can_be", [])
+        new_icd2hpo = dataloader.get_icd_hpo_in_limited_hpo_set(dataloader.hpo_phenotypic_abnormality_id)
+        hpo_predecessors_node = set()
+        for icd in new_icd2hpo:
+            hpo_predecessors_node.update(new_icd2hpo[icd])
 
         def keep_predecessors_only(text):
             if not isinstance(text, str) or len(text) == 0:
@@ -210,8 +214,77 @@ def keyword_search():
     return mimic_data
 
 def keyword_search_with_negation():
-    # TODO: baseline: keyword search with negation
-    pass
+
+    keyword_search_df = keyword_search()
+
+    if "HPO_CODE_LIST_KEYWORD_SEARCH_PREDECESSORS_ONLY_WITH_NEGATION" not in keyword_search_df.columns:
+
+        forward_negative_word = [
+            'not', 'never', 'hardly', 'rarely', 'rule out', 'rules out',
+            'ruled out', 'no', 'no evidence of', 'no support of', 'no suspicion of',
+            'without', 'without evidence of', 'without support of', 'without suspicion of',
+            'deny', 'denies', 'denied', 'unlikely', 'no change to',
+            'no signs of', 'without signs of', 'absence of', 'doubt', 'doubts', 'doubted',
+            'no further', 'without any further', 'without further'
+        ]
+        backward_negative_word = [
+            'not', 'never', 'hardly', 'rarely', 'is rule out',
+            'has been ruled out', 'has no evidence', 'has no support', 'has no suspicion',
+            'is denied', 'is unlikely',
+            'has no signs', 'is absent', 'is not demonstrated', 'is negative', 'is doubted',
+        ]
+        hpo_list = keyword_search_df["HPO_CODE_LIST_KEYWORD_SEARCH_WITHOUT_PARENT"].tolist()
+
+        refer = keyword_search_df["HPO_CODE_LIST_KEYWORD_SEARCH_PREDECESSORS_ONLY"].tolist()
+
+        clean_text = keyword_search_df["CLEAN_TEXT"].tolist()
+        hpo_data = dataloader.get_hpo4dataset()
+        assert len(hpo_list) == len(clean_text)
+
+        hpo_children_info = dataloader.get_hpo_children_info()
+        children_to_predecessor_mapping = dict()
+        for hpo in dataloader.hpo_limited_list:
+            children = hpo_children_info[hpo]
+            for cnode in children:
+                if cnode not in children_to_predecessor_mapping:
+                    children_to_predecessor_mapping[cnode] = set()
+                children_to_predecessor_mapping[cnode].add(hpo)
+
+        num_of_nega = 0
+        new_hpo_list = []
+        for i in trange(len(hpo_list)):
+            hpostr = hpo_list[i]
+            doc = clean_text[i]
+            if isinstance(hpostr, float):
+                new_hpo_list.append("")
+                continue
+            hpos = hpostr.split("/")
+            hposet = set()
+            for hpo in hpos:
+                terms = hpo_data[hpo]['terms']
+                nega_terms = []
+                for term in terms:
+                    for pre in forward_negative_word:
+                        nega_terms.append(pre + " " + term)
+                    for pos in backward_negative_word:
+                        nega_terms.append(term + " " + pos)
+                nega_flag = False
+                for term in nega_terms:
+                    if term in doc:
+                        nega_flag = True
+                        num_of_nega += 1
+                        break
+                if not nega_flag:
+                    if hpo in children_to_predecessor_mapping:
+                        hposet.update(children_to_predecessor_mapping[hpo])
+            new_hpo_list.append("/".join(hposet))
+        assert len(new_hpo_list) == len(hpo_list)
+        print("Num of negation detected: %d" % num_of_nega)
+
+        keyword_search_df["HPO_CODE_LIST_KEYWORD_SEARCH_PREDECESSORS_ONLY_WITH_NEGATION"] = new_hpo_list
+        keyword_search_df.to_csv(keyword_search_results_file)
+
+    return keyword_search_df
 
 def random_pick():
     # TODO: randomly pick a random number of HPO terms
@@ -245,6 +318,7 @@ if __name__ == '__main__':
     # Avg HPO for those have 6                                                                                              │·····················································································
     # Median HPO for those have 5
 
+    '''
     mimic_data = keyword_search()
     hpo_list = mimic_data['HPO_CODE_LIST_KEYWORD_SEARCH_PREDECESSORS_ONLY'].to_list()
     print("Num of EHR has HPO %d/%d" % (np.sum([1 for hstr in hpo_list if not isinstance(hstr, float) and len(hstr) > 0]), len(hpo_list)))
@@ -252,6 +326,11 @@ if __name__ == '__main__':
     print("Median HPO for all %.f" % np.median([len([h for h in hstr.split("/") if len(h) > 0]) if isinstance(hstr, str) else 0 for hstr in hpo_list]))
     print("Avg HPO for those have %.f" % np.mean([len([h for h in hstr.split("/") if len(h) > 0]) for hstr in hpo_list if not isinstance(hstr, float) and len(hstr) > 0]))
     print("Median HPO for those have %.f" % np.median([len([h for h in hstr.split("/") if len(h) > 0]) for hstr in hpo_list if not isinstance(hstr, float) and len(hstr) > 0]))
+    '''
+    # Avg HPO for all 12
+    # Median HPO for all 12
+    # Avg HPO for those have 12
+    # Median HPO for those have 12
 
     '''
     hpo_list = mimic_data["HPO_CODE_LIST_KEYWORD_SEARCH_WITH_PARENT"].tolist()
@@ -280,6 +359,20 @@ if __name__ == '__main__':
     # Avg HPO for those have 44
     # Median HPO for those have 41
 
+    '''
+    mimic_data = keyword_search_with_negation()
+    hpo_list = mimic_data['HPO_CODE_LIST_KEYWORD_SEARCH_PREDECESSORS_ONLY_WITH_NEGATION'].to_list()
+    print("Num of EHR has HPO %d/%d" % (np.sum([1 for hstr in hpo_list if not isinstance(hstr, float) and len(hstr) > 0]), len(hpo_list)))
+    print("Avg HPO for all %.f" % np.mean([len([h for h in hstr.split("/") if len(h) > 0]) if isinstance(hstr, str) else 0 for hstr in hpo_list]))
+    print("Median HPO for all %.f" % np.median([len([h for h in hstr.split("/") if len(h) > 0]) if isinstance(hstr, str) else 0 for hstr in hpo_list]))
+    print("Avg HPO for those have %.f" % np.mean([len([h for h in hstr.split("/") if len(h) > 0]) for hstr in hpo_list if not isinstance(hstr, float) and len(hstr) > 0]))
+    print("Median HPO for those have %.f" % np.median([len([h for h in hstr.split("/") if len(h) > 0]) for hstr in hpo_list if not isinstance(hstr, float) and len(hstr) > 0]))
+    '''
+    # Num of EHR has HPO 52721/52722
+    # Avg HPO for all 11
+    # Median HPO for all 11
+    # Avg HPO for those have 11
+    # Median HPO for those have 11
 
     pass
 

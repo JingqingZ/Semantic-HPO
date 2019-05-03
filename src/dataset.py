@@ -112,7 +112,6 @@ class BERTDataset(Dataset):
 
         return cur_tensors
 
-
     def random_sent(self, index):
         """
         Get one sample from corpus consisting of two sentences. With prob. 50% these are two subsequent sentences
@@ -674,8 +673,214 @@ class SentenceEmbeddingDataset(Dataset):
 
         return cur_tensors
 
+class UnsupervisedAnnotationMIMICDataset(Dataset):
+    def __init__(self, sentences_list, tokenizer, seq_len=config.sequence_length // 2):
+        self.vocab = tokenizer.vocab
+        self.tokenizer = tokenizer
+        self.seq_len = seq_len
 
+        self.samples = sentences_list
 
+    def __len__(self):
+        return len(self.samples)
+
+    def __getitem__(self, item):
+        text = self.samples[item]
+
+        tokens_a = self.tokenizer.tokenize(text)
+
+        while True:
+            if len(tokens_a) <= self.seq_len - 2:
+                break
+            else:
+                tokens_a.pop()
+
+        tokens = []
+        segment_ids = []
+        tokens.append("[CLS]")
+        segment_ids.append(0)
+        for token in tokens_a:
+            tokens.append(token)
+            segment_ids.append(0)
+        tokens.append("[SEP]")
+        segment_ids.append(0)
+
+        input_ids = self.tokenizer.convert_tokens_to_ids(tokens)
+
+        input_mask = [1] * len(input_ids)
+
+        # Zero-pad up to the sequence length.
+        while len(input_ids) < self.seq_len:
+            input_ids.append(0)
+            input_mask.append(0)
+            segment_ids.append(0)
+
+        assert len(input_ids) == self.seq_len
+        assert len(input_mask) == self.seq_len
+        assert len(segment_ids) == self.seq_len
+
+        cur_tensors = (torch.tensor(input_ids),
+                       torch.tensor(input_mask),
+                       torch.tensor(segment_ids))
+
+        return cur_tensors
+
+class UnsupervisedAnnotationHPODataset(Dataset):
+    def __init__(self, hpo_limited_list, hpo_children_info, corpus_hpo_data, tokenizer, seq_len=config.sequence_length // 2):
+        self.vocab = tokenizer.vocab
+        self.tokenizer = tokenizer
+        self.seq_len = seq_len
+
+        self.root_hpo_descriptions = [corpus_hpo_data[hpo] for hpo in hpo_limited_list]
+        self.samples = list()
+        self.index_of_samples = dict()
+        for hidx, hpo in enumerate(hpo_limited_list):
+            assert hpo not in self.index_of_samples
+            self.index_of_samples[hpo] = len(self.samples)
+            sample = {
+                'root_hpo_idx': [hidx],
+                'description': corpus_hpo_data[hpo]
+            }
+            self.samples.append(sample)
+            hpo_children = hpo_children_info[hpo]
+            for cnode in hpo_children:
+                if cnode not in self.index_of_samples:
+                    self.index_of_samples[cnode] = len(self.samples)
+                    sample = {
+                        'root_hpo_idx': [hidx],
+                        'description': corpus_hpo_data[cnode]
+                    }
+                    self.samples.append(sample)
+                else:
+                    self.samples[self.index_of_samples[cnode]]["root_hpo_idx"].append(hidx)
+
+    def __len__(self):
+        return len(self.samples)
+
+    def __getitem__(self, item):
+        text = self.samples[item]['description']
+        root_hpo_idx = random.choice(self.samples[item]['root_hpo_idx'])
+        root_hpo_text = self.root_hpo_descriptions[root_hpo_idx]
+
+        tokens_a = self.tokenizer.tokenize(text)
+        tokens_h = self.tokenizer.tokenize(root_hpo_text)
+
+        while True:
+            if len(tokens_a) <= self.seq_len - 2:
+                break
+            else:
+                tokens_a.pop()
+
+        while True:
+            if len(tokens_h) <= self.seq_len - 2:
+                break
+            else:
+                tokens_h.pop()
+
+        tokens = []
+        segment_ids = []
+        tokens.append("[CLS]")
+        segment_ids.append(0)
+        for token in tokens_a:
+            tokens.append(token)
+            segment_ids.append(0)
+        tokens.append("[SEP]")
+        segment_ids.append(0)
+
+        tokens_hpo = []
+        tokens_hpo.append("[CLS]")
+        for token in tokens_h:
+            tokens_hpo.append(token)
+        tokens_hpo.append("[SEP]")
+
+        input_ids = self.tokenizer.convert_tokens_to_ids(tokens)
+        input_ids_hpo = self.tokenizer.convert_tokens_to_ids(tokens_hpo)
+
+        input_mask = [1] * len(input_ids)
+
+        # Zero-pad up to the sequence length.
+        while len(input_ids) < self.seq_len:
+            input_ids.append(0)
+            input_mask.append(0)
+            segment_ids.append(0)
+        while len(input_ids_hpo) < self.seq_len:
+            input_ids_hpo.append(0)
+
+        # FIXME
+        one_root_hpo_id = root_hpo_idx
+        all_root_hpo_alpha = [float(0)] * len(self.root_hpo_descriptions)
+        for rhidx in self.samples[item]["root_hpo_idx"]:
+            all_root_hpo_alpha[rhidx] = float(1)
+
+        assert len(input_ids_hpo) == self.seq_len
+        assert len(input_ids) == self.seq_len
+        assert len(input_mask) == self.seq_len
+        assert len(segment_ids) == self.seq_len
+
+        cur_tensors = (torch.tensor(input_ids),
+                       torch.tensor(input_ids_hpo),
+                       torch.tensor(input_mask),
+                       torch.tensor(segment_ids),
+                       torch.tensor(one_root_hpo_id),
+                       torch.tensor(all_root_hpo_alpha)
+                       )
+
+        return cur_tensors
+
+class UnsupervisedAnnotationHPORootDataset(Dataset):
+    def __init__(self, hpo_limited_list, corpus_hpo_data, tokenizer, seq_len=config.sequence_length // 2):
+        self.vocab = tokenizer.vocab
+        self.tokenizer = tokenizer
+        self.seq_len = seq_len
+
+        self.samples = [corpus_hpo_data[hpo] for hpo in hpo_limited_list]
+
+    def __len__(self):
+        return len(self.samples)
+
+    def __getitem__(self, item):
+        text = self.samples[item]
+
+        tokens_a = self.tokenizer.tokenize(text)
+
+        while True:
+            if len(tokens_a) <= self.seq_len - 2:
+                break
+            else:
+                tokens_a.pop()
+
+        tokens = []
+        segment_ids = []
+        tokens.append("[CLS]")
+        segment_ids.append(0)
+        for token in tokens_a:
+            tokens.append(token)
+            segment_ids.append(0)
+        tokens.append("[SEP]")
+        segment_ids.append(0)
+
+        input_ids = self.tokenizer.convert_tokens_to_ids(tokens)
+
+        input_mask = [1] * len(input_ids)
+
+        # Zero-pad up to the sequence length.
+        while len(input_ids) < self.seq_len:
+            input_ids.append(0)
+            input_mask.append(0)
+            segment_ids.append(0)
+
+        alpha = item
+
+        assert len(input_ids) == self.seq_len
+        assert len(input_mask) == self.seq_len
+        assert len(segment_ids) == self.seq_len
+
+        cur_tensors = (torch.tensor(input_ids),
+                       torch.tensor(input_mask),
+                       torch.tensor(segment_ids),
+                       torch.tensor(alpha))
+
+        return cur_tensors
 
 if __name__ == '__main__':
     pass

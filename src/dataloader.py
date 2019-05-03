@@ -46,6 +46,7 @@ hpo_description_file = data_dir + "HPO/description.json"
 # create by get_hpo4dataset()
 # this file connects mimic and hpo via keywords search
 hpo_dataset_file = data_dir + "HPO/dataset.pickle"
+hpo_children_info_file = data_dir + "HPO/children.pickle"
 # OMIM to HPO mapping
 omim2hpo_file = data_dir + "HPO/omim2hpo.json"
 # ICD to OMIM mapping
@@ -73,6 +74,14 @@ hpo_domains = [
 
 hpo_root_id = "HP:0000001"
 hpo_phenotypic_abnormality_id = "HP:0000118"
+hpo_limited_list = [
+    'HP:0000707', 'HP:0000478', 'HP:0001507', 'HP:0001626',
+    'HP:0001939', 'HP:0025354', 'HP:0025031', 'HP:0000598',
+    'HP:0003549', 'HP:0001574', 'HP:0000152', 'HP:0000924',
+    'HP:0001608', 'HP:0002664', 'HP:0001871', 'HP:0000769',
+    'HP:0025142', 'HP:0000818', 'HP:0000119', 'HP:0001197',
+    'HP:0040064', 'HP:0003011', 'HP:0002715', 'HP:0002086'
+]
 
 def load_hpo_ontology():
     print("Loading HPO ontology ...")
@@ -464,6 +473,26 @@ def get_corpus(most_common=config.vocabulary_size, sentence_length=config.sequen
         # Total num of MIMIC docs: 52722
         # Total num of MIMIC sentences: 2575124
 
+    hpo_onto = load_hpo_ontology()
+
+    for hpo in hpo_limited_list:
+        children = hpo_onto[hpo]["relations"].get("can_be", [])
+        if len(clean_hpo_doc_dict[hpo].split()) < config.sequence_length // 2:
+            origin_word_set = set(["abnormality", "of"])
+            newwordlist = list()
+            for cnode in children:
+                for word in clean_hpo_doc_dict[cnode].split():
+                    if word not in origin_word_set:
+                        newwordlist.append(word)
+            new_desc = "%s %s" % (
+                clean_hpo_doc_dict[hpo],
+                " ".join(newwordlist)
+            )
+        else:
+            new_desc = clean_hpo_doc_dict[hpo]
+        clean_hpo_doc_dict[hpo] =new_desc
+    del hpo_onto
+
     return clean_mimic_doc_list, clean_hpo_doc_dict
 
 def get_raredisease2hpo_mapping():
@@ -616,6 +645,23 @@ def get_hpo4dataset():
 
     return hpo_dataset
 
+def get_hpo_children_info():
+
+    if not os.path.exists(hpo_children_info_file):
+        hpo_children_info = dict()
+        hpo_data = get_hpo4dataset()
+        for hpo in hpo_data:
+            hpo_children_info[hpo] = hpo_data[hpo]["children_node"]
+
+        with open(hpo_children_info_file, 'wb') as f:
+            pickle.dump(hpo_children_info, f)
+
+    else:
+
+        with open(hpo_children_info_file, 'rb') as f:
+            hpo_children_info = pickle.load(f)
+    return hpo_children_info
+
 def get_omim_hpo_mapping():
 
     if not os.path.exists(omim2hpo_file):
@@ -711,9 +757,11 @@ def get_icd_hpo_silver_mapping():
 # if root_node == 'HP:0000118'
 # only the direct children nodes of 'HP:0000118' will be considered in all annotation
 def get_icd_hpo_in_limited_hpo_set(root_node):
-    hpo_data = get_hpo4dataset()
-    hpo_onto = load_hpo_ontology()
-    seed_node = hpo_onto[root_node]["relations"].get("can_be", [])
+    # hpo_data = get_hpo4dataset()
+    # hpo_onto = load_hpo_ontology()
+    # seed_node = hpo_onto[root_node]["relations"].get("can_be", [])
+    seed_node = hpo_limited_list
+    print(seed_node, len(seed_node))
 
     node_mapping = dict()
     for s in seed_node:
@@ -752,8 +800,10 @@ if __name__ == "__main__":
     # hpo_desc = load_hpo_description()
     # hpo_desc = convert_hpo_to_flat_description()
     # load_mimic()
-    # mimic_data, hpo_data = get_corpus(rebuild=False)
     # mimic_data, hpo_data = get_corpus(rebuild=True)
+    mimic_data, hpo_data = get_corpus(rebuild=False)
+    for hpo in hpo_limited_list:
+        print(hpo, hpo_data[hpo])
     # print(mimic_data[0])
     # print(hpo_data['HP:0001804'])
     # for d in data[-50000:]:
@@ -794,16 +844,15 @@ if __name__ == "__main__":
     # print(len(icd2hpo))
     # print(len(hpo_subset))
 
-    new_icd2hpo = get_icd_hpo_in_limited_hpo_set("HP:0000118")
-    print(new_icd2hpo)
-    print(len(new_icd2hpo)) # 98
-    hpo_set = set()
-    for icd in new_icd2hpo:
-        hpo_set.update(new_icd2hpo[icd])
-    print(len(hpo_set)) # 24
-    print(np.mean([len(new_icd2hpo[icd]) for icd in new_icd2hpo])) # 8.102
-
-    pass
+    # new_icd2hpo = get_icd_hpo_in_limited_hpo_set("HP:0000118")
+    # print(new_icd2hpo)
+    # print(len(new_icd2hpo)) # 98
+    # hpo_set = set()
+    # for icd in new_icd2hpo:
+    #     hpo_set.update(new_icd2hpo[icd])
+    # print(len(hpo_set)) # 24
+    # print(hpo_set)
+    # print(np.mean([len(new_icd2hpo[icd]) for icd in new_icd2hpo])) # 8.102
 
     # TODO: write a HPCC version of data processing
     pass

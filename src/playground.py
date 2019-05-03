@@ -3,8 +3,12 @@ import pickle
 from tqdm import tqdm
 import numpy as np
 
+import utils
 import config
 import dataloader
+import baselines
+import evaluation
+import decision
 
 def orphadata():
     data_folder = "../data/orphadata/"
@@ -87,6 +91,80 @@ def avg_hpo_per_sentence():
     # Q90 num of HPO per sentence: 6
     # Avg num of HPO per sentence: 3
     # Median num of HPO per sentence: 2
+
+def avg_hpo_per_sentence2():
+    # only analysis the target hpo terms
+    mimic_data, _ = dataloader.get_corpus()
+
+    counter = 0
+    for doc in mimic_data:
+        if len(doc) == 0:
+            continue
+        counter += len(doc.split("\n"))
+
+    hpo_data = dataloader.get_hpo4dataset()
+    sentence_dict = dict()
+
+    children_info = dataloader.get_hpo_children_info()
+
+    children_to_predecessor = dict()
+    for hpoid in dataloader.hpo_limited_list:
+        for cnode in children_info[hpoid]:
+            if cnode not in children_to_predecessor:
+                children_to_predecessor[cnode] = set()
+            children_to_predecessor[cnode].add(hpoid)
+
+    for node in children_to_predecessor:
+        for sentence in (hpo_data[node]['mimic_train'] | hpo_data[node]['mimic_test']):
+            if sentence not in sentence_dict:
+                sentence_dict[sentence] = set()
+            sentence_dict[sentence].update(children_to_predecessor[node])
+
+    print("Total num of sentence that have HPO: %d / %d" % (len(sentence_dict), counter))
+    print("Max num of HPO per sentence: %.f" % np.max([len(sentence_dict[s]) for s in sentence_dict]))
+    print("Q90 num of HPO per sentence: %.f" % np.quantile([len(sentence_dict[s]) for s in sentence_dict], 0.9))
+    print("Avg num of HPO per sentence: %.f" % np.mean([len(sentence_dict[s]) for s in sentence_dict]))
+    print("Median num of HPO per sentence: %.f" % np.median([len(sentence_dict[s]) for s in sentence_dict]))
+    # Total num of sentence that have HPO: 1842715 / 2575124
+    # Max num of HPO per sentence: 13
+    # Q90 num of HPO per sentence: 4
+    # Avg num of HPO per sentence: 2
+    # Median num of HPO per sentence: 2
+
+    hpo_onto = dataloader.load_hpo_ontology()
+
+    for sentence in sentence_dict:
+        if len(sentence_dict[sentence]) > 10:
+            print(sentence)
+            hpolist = list(sentence_dict[sentence])
+            print(hpolist)
+            print([hpo_onto[hpo]['name'] for hpo in hpolist])
+            print("---")
+
+def analysis_overlapping_of_children_node():
+
+    children_info = dataloader.get_hpo_children_info()
+
+    children_to_predecessor = dict()
+    for hpoid in dataloader.hpo_limited_list:
+        for cnode in children_info[hpoid]:
+            if cnode not in children_to_predecessor:
+                children_to_predecessor[cnode] = set()
+            children_to_predecessor[cnode].add(hpoid)
+
+    counter = [0] * 5
+    for cnode in children_to_predecessor:
+        if len(children_to_predecessor[cnode]) >= 5:
+            print(cnode)
+            # HP:0005508
+            # HP:0009711
+            # HP:0200151
+            counter[4] += 1
+        else:
+            counter[len(children_to_predecessor[cnode]) - 1] += 1
+
+    print("Overlapping of children node for the target HPOs: ", counter)
+    # Overlapping of children node for the target HPOs:  [8534, 4722, 453, 83, 3]
 
 def hpo_have_most_sentences():
     hpo_data = dataloader.get_hpo4dataset()
@@ -218,6 +296,77 @@ def get_icd2hpo_in_limited_hpo_set(root_node):
 
     return new_icd2hpo
 
+def analysis_alpha_out(corpus_to_analysis):
+    import decision
+
+    if corpus_to_analysis == 'test' or corpus_to_analysis == 'all':
+        test_sentence2alpha = decision.load_sentence2alpha_mapping(corpus_to_analysis='test')
+    else:
+        test_sentence2alpha = {}
+    if corpus_to_analysis == 'train' or corpus_to_analysis == 'all':
+        train_sentence2alpha = decision.load_sentence2alpha_mapping(corpus_to_analysis='train')
+    else:
+        train_sentence2alpha = {}
+
+    sentence2alpha = {**train_sentence2alpha, **test_sentence2alpha}
+    del train_sentence2alpha, test_sentence2alpha
+
+    numprint = 0
+    for sent in sentence2alpha:
+        if np.max(sentence2alpha[sent]) > 0.5:
+            print(sent)
+            print(dataloader.hpo_limited_list[np.argmax(sentence2alpha[sent])])
+            print(sentence2alpha[sent])
+            print("-----------")
+            numprint += 1
+        if numprint > 10:
+            break
+
+def description_of_hpo():
+    _, corpus_hpo = dataloader.get_corpus()
+    for hpo in dataloader.hpo_limited_list:
+        print(hpo)
+        print(corpus_hpo[hpo])
+        print("----")
+
+def distribution_of_hpo_in_silver_standard(result_list):
+    hpo_counter = dict()
+    for hpostr in result_list:
+        if isinstance(hpostr, float):
+            continue
+        hpolist = hpostr.split("/")
+        for hpo in hpolist:
+            hpo_counter[hpo] = hpo_counter.get(hpo, 0) + 1
+
+    for hpo in dataloader.hpo_limited_list:
+        print(hpo, hpo_counter.get(hpo, 0))
+
+    pass
+
+def hpo_description_optimization():
+    hpo_onto = dataloader.load_hpo_ontology()
+    _, corpus_hpo_data = dataloader.get_corpus()
+
+    for hpo in dataloader.hpo_limited_list:
+        children = hpo_onto[hpo]["relations"].get("can_be", [])
+        if len(corpus_hpo_data[hpo].split()) < config.sequence_length // 2:
+            origin_word_set = set(["abnormality", "of"])
+            newwordlist = list()
+            for cnode in children:
+                for word in corpus_hpo_data[cnode].split():
+                    if word not in origin_word_set:
+                        newwordlist.append(word)
+            new_desc = "%s %s" % (
+                corpus_hpo_data[hpo],
+                " ".join(newwordlist)
+            )
+        else:
+            new_desc = corpus_hpo_data[hpo]
+        print(corpus_hpo_data[hpo])
+        print(new_desc)
+        print("===")
+
+
 
 if __name__ == '__main__':
     # icd_distribution_in_mimic()
@@ -228,4 +377,21 @@ if __name__ == '__main__':
     # analysis_hpo_embedding(level=1)
     # analysis_hpo_embedding(level=2)
     # analysis_hpo_embedding(level=1, root_node="HP:0000118")
+    # analysis_alpha_out(corpus_to_analysis='train')
+    # analysis_alpha_out(corpus_to_analysis='train')
+    # analysis_alpha_out(corpus_to_analysis='test')
+    # description_of_hpo()
+
+    # avg_hpo_per_sentence2()
+
+    '''
+    distribution_of_hpo_in_silver_standard(baselines.silver_standard()['HPO_CODE_LIST'].tolist())
+    print("----")
+    distribution_of_hpo_in_silver_standard(decision.results_of_alpha_out(threshold=0.5, mode='argmax')["HPO_CODE_LIST_UNSUPERVISED_METHOD_PREDECESSORS_ONLY"].tolist())
+    print("----")
+    distribution_of_hpo_in_silver_standard(decision.results_of_alpha_out(threshold=0.1, mode='doc')["HPO_CODE_LIST_UNSUPERVISED_METHOD_PREDECESSORS_ONLY"].tolist())
+    '''
+
+    # analysis_overlapping_of_children_node()
+    hpo_description_optimization()
     pass

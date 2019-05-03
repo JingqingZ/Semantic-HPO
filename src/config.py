@@ -1,17 +1,21 @@
 
 train_epoch = 10
+train_epoch_unsupervised = 10
 train_batch_size = 64
 test_batch_size = 64
 
 save_step_4_pretrain = 5000
 save_step_4_annotation = 5000
+save_step_4_unsupervised = 5000
 print_step = 100
+print_step_unsupervised = 100
 
 sequence_length = 64
 vocabulary_size = 30000
 
 learning_rate_4_pretrain = 3e-4
 learning_rate_4_annotation = 1e-3
+learning_rate_4_unsupervised = 3e-4
 warmup_proportion = 0.1 # proportion of training to perform linear learning rate warmup for.
 
 step_to_train_all_weights = 20000
