@@ -5,9 +5,9 @@ import pandas as pd
 from tqdm import tqdm
 from collections import Counter
 
-import config, dataloader, utils
+import config, dataloader, utils, mimic_proc
 
-def load_sentence2alpha_mapping(corpus_to_analysis, softmax=True):
+def load_sentence2alpha_mapping(corpus_to_analysis, sigmoid=True):
 
     sentence2alpha = dict()
 
@@ -37,8 +37,9 @@ def load_sentence2alpha_mapping(corpus_to_analysis, softmax=True):
     for sidx, sent in enumerate(tqdm(mimic_sentence_list)):
         if sent in sentence2alpha:
             continue
-        if softmax:
-            sentence2alpha[sent] = utils.softmax(mimic_alpha_results[sidx])
+        # TODO: change to sigmoid
+        if sigmoid:
+            sentence2alpha[sent] = utils.sigmoid(mimic_alpha_results[sidx])
         else:
             sentence2alpha[sent] = mimic_alpha_results[sidx]
 
@@ -50,17 +51,26 @@ def results_of_alpha_out(threshold, mode):
 
     assert mode == 'argmax' or mode == 'all' or mode == 'doc' or mode == 'multi'
 
-    if not os.path.exists(unsupervised_method_results_file):
+    # if not os.path.exists(unsupervised_method_results_file):
+    if True:
         test_sentence2alpha = load_sentence2alpha_mapping(corpus_to_analysis='test')
         train_sentence2alpha = load_sentence2alpha_mapping(corpus_to_analysis='train')
 
         sentence2alpha = {**train_sentence2alpha, **test_sentence2alpha}
         del train_sentence2alpha, test_sentence2alpha
 
+        for idx, sent in enumerate(sentence2alpha):
+            print(sent)
+            print(["%.4f" % a for a in sentence2alpha[sent]])
+            if idx > 10:
+                break
+        exit()
+
         mimic_data = dataloader.load_mimic()
 
         def text2hpo(text):
-            sentences = text.split("\n")
+            sentences = mimic_proc.get_sentences_from_mimic(text)
+            # sentences = text.split("\n")
             hpodict = dict()
             hposet = set()
             for sent in sentences:
@@ -84,7 +94,7 @@ def results_of_alpha_out(threshold, mode):
                     if maxval > threshold:
                         hpoid = np.argmax(sentence2alpha[sent])
                         hpodict[dataloader.hpo_limited_list[hpoid]] = 0
-                    elif maxval > 0.4:
+                    elif maxval > 0.3:
                         for hpoid in range(sentence2alpha[sent].shape[0]):
                             if sentence2alpha[sent][hpoid] / maxval > threshold:
                                 hpodict[dataloader.hpo_limited_list[hpoid]] = 0
@@ -150,12 +160,16 @@ if __name__ == '__main__':
     # Avg HPO for those have 6
     # Median HPO for those have 6
 
-    mimic_data = results_of_alpha_out(threshold=0.7, mode='multi')
+    # mimic_data = results_of_alpha_out(threshold=0.7, mode='multi')
     # Num of EHR has HPO 52626/52722
     # Avg HPO for all 7
     # Median HPO for all 7
     # Avg HPO for those have 7
     # Median HPO for those have 7
+
+    # TODO: analyze results
+    # why hpo no 5 prob is so high
+    mimic_data = results_of_alpha_out(threshold=0.5, mode='all')
 
     hpo_list = mimic_data["HPO_CODE_LIST_UNSUPERVISED_METHOD_PREDECESSORS_ONLY"].tolist()
     print("Num of EHR has HPO %d/%d" % (np.sum([1 for hstr in hpo_list if not isinstance(hstr, float) and len(hstr) > 0]), len(hpo_list)))

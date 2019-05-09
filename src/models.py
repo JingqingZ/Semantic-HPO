@@ -154,6 +154,7 @@ class Generator(nn.Module):
         latent_prime = torch.matmul(
             all_hpo_latent_inputs.permute(0, 2, 1),
             F.sigmoid(alpha_inputs).unsqueeze(dim=-1)
+            # F.softmax(alpha_inputs).unsqueeze(dim=-1)
         ).squeeze(dim=-1)
         hidden_state = self.dense_latent(latent_prime).reshape([-1, self.config.max_seq_len, self.config.hidden_size])
 
@@ -251,9 +252,9 @@ class EncoderCNN(nn.Module):
         # TODO: regularizers such as batchnorm dropout
 
     def forward(self, input_ids):
-        seq_length = input_ids.size(1)
-        position_ids = torch.arange(seq_length, dtype=torch.long, device=input_ids.device)
-        position_ids = position_ids.unsqueeze(0).expand_as(input_ids)
+        # seq_length = input_ids.size(1)
+        # position_ids = torch.arange(seq_length, dtype=torch.long, device=input_ids.device)
+        # position_ids = position_ids.unsqueeze(0).expand_as(input_ids)
         # words_embeddings = self.word_embeddings(input_ids)
         # position_embeddings = self.position_embeddings(position_ids)
         # embeddings = words_embeddings + position_embeddings

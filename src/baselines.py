@@ -5,9 +5,11 @@ from tqdm import tqdm, trange
 
 import dataloader
 import config
+import mimic_proc
 
 silver_standard_results_file = config.outputs_results_dir + "silver_standard.csv"
 keyword_search_results_file = config.outputs_results_dir + "keyword_search.csv"
+ehr_phenolyzer_ncbo_results_file = config.outputs_results_dir + "ehr_pheno_ncbo.csv"
 
 def silver_standard():
 
@@ -161,7 +163,8 @@ def keyword_search():
 
         def text_to_hpo_by_keyword_with_parent(text):
             hposet = set()
-            sentences = text.split("\n")
+            # sentences = text.split("\n")
+            sentences = mimic_proc.get_sentences_from_mimic(text)
             for sentence in sentences:
                 if sentence in sentence2hpo_with_parent:
                     hposet.update(sentence2hpo_with_parent[sentence])
@@ -170,7 +173,8 @@ def keyword_search():
 
         def text_to_hpo_by_keyword_without_parent(text):
             hposet = set()
-            sentences = text.split("\n")
+            # sentences = text.split("\n")
+            sentences = mimic_proc.get_sentences_from_mimic(text)
             for sentence in sentences:
                 if sentence in sentence2hpo_without_parent:
                     hposet.update(sentence2hpo_without_parent[sentence])
@@ -186,10 +190,11 @@ def keyword_search():
         # root_node = dataloader.hpo_phenotypic_abnormality_id
         # hpo_onto = dataloader.load_hpo_ontology()
         # hpo_predecessors_node = hpo_onto[root_node]["relations"].get("can_be", [])
-        new_icd2hpo = dataloader.get_icd_hpo_in_limited_hpo_set(dataloader.hpo_phenotypic_abnormality_id)
-        hpo_predecessors_node = set()
-        for icd in new_icd2hpo:
-            hpo_predecessors_node.update(new_icd2hpo[icd])
+        # new_icd2hpo = dataloader.get_icd_hpo_in_limited_hpo_set(dataloader.hpo_phenotypic_abnormality_id)
+        # hpo_predecessors_node = set()
+        # for icd in new_icd2hpo:
+        #     hpo_predecessors_node.update(new_icd2hpo[icd])
+        hpo_predecessors_node = set(dataloader.hpo_limited_list)
 
         def keep_predecessors_only(text):
             if not isinstance(text, str) or len(text) == 0:
@@ -294,6 +299,88 @@ def topic_model():
     # TODO: use topic model and design a rule to connect topics with HPO
     pass
 
+def ehr_phenolyzer():
+
+    # if not os.path.exists(ehr_phenolyzer_ncbo_results_file):
+    if True:
+        import sys
+        PACKAGE_PARENT = '../baselines/EHR-Phenolyzer/'
+        SCRIPT_DIR = os.path.dirname(os.path.realpath(os.path.join(os.getcwd(), os.path.expanduser(__file__))))
+        sys.path.append(os.path.normpath(os.path.join(SCRIPT_DIR, PACKAGE_PARENT)))
+
+        # import ehr_phenolyzer
+        import lib.pyncbo_annotator as ncbo_ann
+
+        # corpus_mimic, _ = dataloader.get_corpus()
+        # corpus_mimic = corpus_mimic[:5]
+        # del _
+        full_mimic_data = dataloader.load_mimic()
+        # assert len(corpus_mimic) == full_mimic_data.shape[0]
+
+        children_info = dataloader.get_hpo_children_info()
+        children_to_predecessor = dict()
+        for hpo_id in dataloader.hpo_limited_list:
+            children = children_info[hpo_id]
+            for cnode in children:
+                if cnode not in children_to_predecessor:
+                    children_to_predecessor[cnode] = set()
+                children_to_predecessor[cnode].add(hpo_id)
+
+        def _convert_to_predecessor(hpo_list):
+            if isinstance(hpo_list, float):
+                return ""
+            new_hpo_set = set()
+            for hpo_id in hpo_list.split("/"):
+                if hpo_id not in children_to_predecessor:
+                    continue
+                new_hpo_set.update(children_to_predecessor[hpo_id])
+            return "/".join(new_hpo_set)
+
+        def _ncbo_annotater(text):
+            text = text.replace("\n", " ")
+            hpo_list = ncbo_ann.run_ncbo_annotator(text)
+            hpostr = "/".join(hpo_list)
+            return hpostr
+
+        print("Computing baseline: EHR Phenolyzer NCBO ...")
+        group_num = 100
+        new_mimic_data = None
+        for i in trange(full_mimic_data.shape[0] // group_num + 1):
+
+            if i == full_mimic_data.shape[0] // group_num:
+                if full_mimic_data.shape[0] == group_num * i:
+                    break
+                mimic_data = full_mimic_data[i * group_num : ].copy(deep=True)
+                # list_hpo_results = ehr_phenolyzer.annotate(corpus_mimic[i * group_num : ], nlp_mode='NCBO')
+            else:
+                mimic_data = full_mimic_data[i * group_num : (i + 1) * group_num].copy(deep=True)
+                # list_hpo_results = ehr_phenolyzer.annotate(corpus_mimic[i * group_num : (i + 1) * group_num], nlp_mode='NCBO')
+
+            # assert mimic_data.shape[0] == len(list_hpo_results)
+
+            # mimic_data['HPO_CODE_LIST_EHR_PHENO'] = pd.Series(["/".join(l) for l in list_hpo_results])
+            mimic_data['HPO_CODE_LIST_EHR_PHENO'] = mimic_data['CLEAN_TEXT'].apply(_ncbo_annotater)
+            mimic_data['HPO_CODE_LIST_EHR_PHENO_PREDECESSORS_ONLY'] = mimic_data['HPO_CODE_LIST_EHR_PHENO'].apply(_convert_to_predecessor)
+
+            mimic_data = mimic_data[["ICD9_CODE_LIST",
+                                     "HPO_CODE_LIST_EHR_PHENO",
+                                     "HPO_CODE_LIST_EHR_PHENO_PREDECESSORS_ONLY",
+                                     "CLEAN_TEXT"]]
+            if new_mimic_data is None:
+                new_mimic_data = mimic_data
+            else:
+                new_mimic_data = pd.concat([new_mimic_data, mimic_data])
+
+            new_mimic_data.to_csv(ehr_phenolyzer_ncbo_results_file)
+
+        # print(new_mimic_data["HPO_CODE_LIST_EHR_PHENO"])
+        # print(new_mimic_data.shape)
+
+    else:
+        new_mimic_data = pd.read_csv(ehr_phenolyzer_ncbo_results_file)
+
+    return new_mimic_data
+
 if __name__ == '__main__':
 
     '''
@@ -327,10 +414,10 @@ if __name__ == '__main__':
     print("Avg HPO for those have %.f" % np.mean([len([h for h in hstr.split("/") if len(h) > 0]) for hstr in hpo_list if not isinstance(hstr, float) and len(hstr) > 0]))
     print("Median HPO for those have %.f" % np.median([len([h for h in hstr.split("/") if len(h) > 0]) for hstr in hpo_list if not isinstance(hstr, float) and len(hstr) > 0]))
     '''
-    # Avg HPO for all 12
-    # Median HPO for all 12
-    # Avg HPO for those have 12
-    # Median HPO for those have 12
+    # Avg HPO for all 9
+    # Median HPO for all 9
+    # Avg HPO for those have 9
+    # Median HPO for those have 9
 
     '''
     hpo_list = mimic_data["HPO_CODE_LIST_KEYWORD_SEARCH_WITH_PARENT"].tolist()
@@ -373,6 +460,8 @@ if __name__ == '__main__':
     # Median HPO for all 11
     # Avg HPO for those have 11
     # Median HPO for those have 11
+
+    mimic_data = ehr_phenolyzer()
 
     pass
 

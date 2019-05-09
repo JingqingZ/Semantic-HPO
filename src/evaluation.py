@@ -1,4 +1,7 @@
 import numpy as np
+import dataloader
+
+_set_of_hpos = set(dataloader.hpo_limited_list)
 
 # reference: https://en.wikipedia.org/wiki/Overlap_coefficient
 def overlap_coefficient(set1, set2):
@@ -19,8 +22,12 @@ def _evaluate(list_of_set1, list_of_set2, func):
     for i in range(len(list_of_set1)):
         if isinstance(list_of_set1[i], float) or isinstance(list_of_set2[i], float):
             continue
-        hposet1 = set(list_of_set1[i].split("/"))
-        hposet2 = set(list_of_set2[i].split("/"))
+        hposet1 = set([_ for _ in list_of_set1[i].split("/") if len(_) > 0])
+        hposet2 = set([_ for _ in list_of_set2[i].split("/") if len(_) > 0])
+
+        for hpo in (hposet1 | hposet2):
+            assert hpo in _set_of_hpos
+
         if len(hposet1) > 0 and len(hposet2) > 0:
             overlap = func(hposet1, hposet2)
             at_least_one_match = 1 if len(hposet1 & hposet2) > 0 else 0
@@ -29,9 +36,9 @@ def _evaluate(list_of_set1, list_of_set2, func):
 
             score_dict[i] = overlap
 
+    '''
     sorted_score = sorted(score_dict.items(), key=lambda kv: kv[1])
 
-    '''
     # worst case
     for i in range(10):
         print(i, sorted_score[i])
@@ -56,15 +63,22 @@ def _evaluate(list_of_set1, list_of_set2, func):
     print("Avg at least one matched: %.8f" % np.mean(at_least_one_match_list))
     print("Median at least one matched: %.8f" % np.median(at_least_one_match_list))
 
+    return score_dict
+
 
 def evaluate_keyword_search(column_of_keyword, func, mode='all'):
     import config
     import baselines
 
-    silver = baselines.silver_standard()['HPO_CODE_LIST'].tolist()
-    keyword = baselines.keyword_search()[column_of_keyword].tolist()
+    silver_data = baselines.silver_standard()
+    keyword_data = baselines.keyword_search()
+
+    silver = silver_data['HPO_CODE_LIST'].tolist()
+    keyword = keyword_data[column_of_keyword].tolist()
     assert len(silver) == len(keyword)
     assert len(silver) == config.total_num_mimic_record
+
+    assert silver_data['CLEAN_TEXT'].tolist()[348] == keyword_data['CLEAN_TEXT'].tolist()[348]
 
     if mode == 'train':
         _evaluate(
@@ -79,6 +93,26 @@ def evaluate_keyword_search(column_of_keyword, func, mode='all'):
             func=func
         )
     elif mode == 'all':
+        _evaluate(
+            silver, keyword,
+            func=func
+        )
+    elif mode == 'complete':
+        print("Training set")
+        _evaluate(
+            [silver[index] for index in config.mimic_train_indices],
+            [keyword[index] for index in config.mimic_train_indices],
+            func=func
+        )
+        print("---------")
+        print("Testing set")
+        _evaluate(
+            [silver[index] for index in config.mimic_test_indices],
+            [keyword[index] for index in config.mimic_test_indices],
+            func=func
+        )
+        print("---------")
+        print("Overall")
         _evaluate(
             silver, keyword,
             func=func
@@ -171,41 +205,64 @@ if __name__ == '__main__':
     evaluate_keyword_search(
         column_of_keyword='HPO_CODE_LIST_KEYWORD_SEARCH_PREDECESSORS_ONLY',
         func=overlap_coefficient,
-        mode='train'
+        mode='complete'
     )
     '''
-    # WITH DIRECT CHILDREN OF HP:0000118 ONLY
     # Training set
     # Total num of records: 36905
-    # Total num of valid comparison: 19601
-    # Avg overlap_coefficient index: 0.65288638
+    # Total num of valid comparison: 19585
+    # Avg overlap_coefficient index: 0.55367395
     # Median overlap_coefficient index: 0.60000000
-    # Avg at least one matched: 0.99836743
+    # Avg at least one matched: 0.99397498
     # Median at least one matched: 1.00000000
     # ---------
     # Testing set
     # Total num of records: 15816
-    # Total num of valid comparison: 8378
-    # Avg overlap_coefficient index: 0.65532264
+    # Total num of valid comparison: 8373
+    # Avg overlap_coefficient index: 0.55553882
     # Median overlap_coefficient index: 0.60000000
-    # Avg at least one matched: 0.99880640
+    # Avg at least one matched: 0.99570047
     # Median at least one matched: 1.00000000
     # ---------
     # Overall
     # Total num of records: 52722
-    # Total num of valid comparison: 27979
-    # Avg overlap_coefficient index: 0.65361589
+    # Total num of valid comparison: 27958
+    # Avg overlap_coefficient index: 0.55423245
     # Median overlap_coefficient index: 0.60000000
-    # Avg at least one matched: 0.99849887
+    # Avg at least one matched: 0.99449174
     # Median at least one matched: 1.00000000
 
-    '''
     evaluate_keyword_search(
         column_of_keyword='HPO_CODE_LIST_KEYWORD_SEARCH_PREDECESSORS_ONLY',
         func=jaccard,
         mode='test'
     )
-    '''
+    # part of mimic
+    # Training set
+    # Total num of records: 36905
+    # Total num of valid comparison: 19585
+    # Avg jaccard index: 0.27036505
+    # Median jaccard index: 0.25000000
+    # Avg at least one matched: 0.99397498
+    # Median at least one matched: 1.00000000
+    # ---------
+    # Testing set
+    # Total num of records: 15816
+    # Total num of valid comparison: 8373
+    # Avg jaccard index: 0.27225081
+    # Median jaccard index: 0.25000000
+    # Avg at least one matched: 0.99570047
+    # Median at least one matched: 1.00000000
+    # ---------
+    # Overall
+    # Total num of records: 52722
+    # Total num of valid comparison: 27958
+    # Avg jaccard index: 0.27092981
+    # Median jaccard index: 0.25000000
+    # Avg at least one matched: 0.99449174
+    # Median at least one matched: 1.00000000
+    # ======================================================
+    # whole mimic
     # WITH DIRECT CHILDREN OF HP:0000118 ONLY
     # Training set
     # Total num of records: 36905
@@ -567,13 +624,15 @@ if __name__ == '__main__':
 
     pass
 
+    '''
     evaluate_unsupervised_method(
         column_of_keyword="HPO_CODE_LIST_UNSUPERVISED_METHOD_PREDECESSORS_ONLY",
-        threshold=0.7,
-        decision_mode='multi',
+        threshold=0.5,
+        decision_mode='all',
         func=jaccard,
         mode="complete"
     )
+    '''
 
 
 

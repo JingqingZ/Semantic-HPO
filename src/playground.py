@@ -166,6 +166,9 @@ def analysis_overlapping_of_children_node():
     print("Overlapping of children node for the target HPOs: ", counter)
     # Overlapping of children node for the target HPOs:  [8534, 4722, 453, 83, 3]
 
+    for hpoid in dataloader.hpo_limited_list:
+        print(hpoid, len(children_info[hpoid]))
+
 def hpo_have_most_sentences():
     hpo_data = dataloader.get_hpo4dataset()
 
@@ -367,6 +370,68 @@ def hpo_description_optimization():
         print("===")
 
 
+_record_idx = 1
+
+def convert_mimic_to_plain_text():
+    mimic_corpus, _ = dataloader.get_corpus()
+    with open(config.outputs_interm_dir + "record%d.txt" % _record_idx, 'w') as f:
+        f.write(mimic_corpus[_record_idx].replace("\n", " "))
+
+def analyze_ehr_phenolyzer_results():
+    children_info = dataloader.get_hpo_children_info()
+
+    silver_data = baselines.silver_standard()
+    print(silver_data['CLEAN_TEXT'].tolist()[0])
+    print(silver_data['ICD9_CODE_LIST'].tolist()[0])
+
+    with open("../baselines/EHR-Phenolyzer/out/record%d.HPO.txt" % _record_idx) as f:
+        results_hpo = set()
+        for line in f:
+            hpo_id = line.split("\t")[0]
+            for hpo_node in dataloader.hpo_limited_list:
+                if hpo_id == hpo_node:
+                    results_hpo.add(hpo_node)
+                elif hpo_id in children_info[hpo_node]:
+                    results_hpo.add(hpo_node)
+        print(sorted(results_hpo))
+
+    silver = silver_data['HPO_CODE_LIST'].tolist()
+    silver = set(silver[_record_idx].split("/"))
+    print(sorted(silver))
+
+    column_of_keyword = 'HPO_CODE_LIST_KEYWORD_SEARCH_PREDECESSORS_ONLY'
+    keyword = baselines.keyword_search()[column_of_keyword].tolist()
+    keyword = set(keyword[_record_idx].split("/"))
+    print(sorted(keyword))
+
+    import evaluation
+    print(evaluation.jaccard(silver, results_hpo))
+    print(evaluation.jaccard(keyword, results_hpo))
+
+
+def analyze_specific_case(doc_id):
+
+    silver_data = baselines.silver_standard()
+    keyword_data = baselines.keyword_search()
+
+    icd = silver_data['ICD9_CODE_LIST'].tolist()[doc_id].split("/")
+    silver = silver_data['HPO_CODE_LIST'].tolist()[doc_id].split("/")
+    keyword = keyword_data['HPO_CODE_LIST_KEYWORD_SEARCH_PREDECESSORS_ONLY'].tolist()[doc_id].split("/")
+    text = silver_data['CLEAN_TEXT'].tolist()[doc_id]
+    assert text == keyword_data['CLEAN_TEXT'].tolist()[doc_id]
+    original_text = dataloader.load_mimic()['TEXT'].tolist()[doc_id]
+
+    icd2hpo = dataloader.get_icd_hpo_silver_mapping()
+    icd2hpo_predcessor = dataloader.get_icd_hpo_in_limited_hpo_set()
+
+    import evaluation
+    print(original_text)
+    print(sorted(icd))
+    print("\n".join(["%s: %s -> %s" % (i, sorted(icd2hpo[i]), sorted(icd2hpo_predcessor[i])) for i in icd if i in icd2hpo]))
+    print(sorted(silver))
+    print(sorted(keyword))
+    print(evaluation.jaccard(set(silver), set(keyword)))
+
 
 if __name__ == '__main__':
     # icd_distribution_in_mimic()
@@ -393,5 +458,10 @@ if __name__ == '__main__':
     '''
 
     # analysis_overlapping_of_children_node()
-    hpo_description_optimization()
+    # hpo_description_optimization()
+    # convert_mimic_to_plain_text()
+    # analyze_ehr_phenolyzer_results()
+    analyze_specific_case(708)
+    # hpodata = dataloader.get_hpo4dataset()
+    # print(hpodata['HP:0000408']['terms'])
     pass

@@ -756,9 +756,9 @@ def get_icd_hpo_silver_mapping():
 
 # if root_node == 'HP:0000118'
 # only the direct children nodes of 'HP:0000118' will be considered in all annotation
-def get_icd_hpo_in_limited_hpo_set(root_node):
-    # hpo_data = get_hpo4dataset()
-    # hpo_onto = load_hpo_ontology()
+def get_icd_hpo_in_limited_hpo_set(root_node=None):
+    hpo_data = get_hpo4dataset()
+    # po_onto = load_hpo_ontology()
     # seed_node = hpo_onto[root_node]["relations"].get("can_be", [])
     seed_node = hpo_limited_list
     print(seed_node, len(seed_node))

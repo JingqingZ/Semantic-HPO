@@ -39,6 +39,7 @@ outputs_dir = "../outputs/"
 outputs_model_dir = outputs_dir + "models/"
 outputs_results_dir = outputs_dir + "results/"
 outputs_figures_dir = outputs_dir + "figures/"
+outputs_interm_dir = outputs_dir + "interm/"
 
 special_tokens_in_vocab = ["[PAD]", "[CLS]", "[UNK]", "[SEP]", "[MASK]"]
 
@@ -51,3 +52,5 @@ if not os.path.exists(outputs_results_dir):
     os.makedirs(outputs_results_dir)
 if not os.path.exists(outputs_figures_dir):
     os.makedirs(outputs_figures_dir)
+if not os.path.exists(outputs_interm_dir):
+    os.makedirs(outputs_interm_dir)

@@ -5,6 +5,7 @@ from tqdm import tqdm, trange
 import numpy as np
 import pickle
 import torch
+import torch.nn.functional as F
 from torch import optim
 from torch.utils.data import DataLoader, Dataset, RandomSampler
 from pytorch_pretrained_bert import BertConfig, BertTokenizer, BertForPreTraining, BertAdam
@@ -544,7 +545,7 @@ class UnsupervisedAnnotationController():
 
         for cur_epoch in range(total_num_epoch):
 
-            def _hpo_res(coefficient1, coefficient2, percentage=1.0):
+            def _hpo_res(coefficient1, coefficient2, coefficient3, percentage=1.0):
 
                 res_hpo_loss_agg = res_alpha_loss_agg = prior_loss_agg = 0
                 for step, batch in enumerate(hpo_corpus_dataloader):
@@ -558,9 +559,13 @@ class UnsupervisedAnnotationController():
                     # full_reconstructed_sequence = self.generator(alpha_out, all_hpo_latent_outputs, None)
                     full_reconstructed_sequence = self.generator(all_hpo_alpha, all_hpo_latent_outputs, None)
 
+                    # torch.set_printoptions(threshold=5000)
+                    # print(F.sigmoid(alpha_out)[:10])
+                    # print(all_hpo_alpha[:10])
+                    # exit()
+
                     res_hpo_loss = loss_function.resconstruction(full_reconstructed_sequence, input_ids)
                     res_alpha_loss = loss_function.alpha_cross_entropy(alpha_out, all_hpo_alpha)
-                    res_loss = coefficient1 * res_hpo_loss + coefficient2 * res_alpha_loss
 
                     #########
                     # prior constrain
@@ -577,10 +582,10 @@ class UnsupervisedAnnotationController():
 
                     prior_loss = hpo_constrain_loss
 
-                    loss = 10 * res_loss + prior_loss
+                    loss = coefficient1 * res_hpo_loss + coefficient2 * res_alpha_loss + coefficient3 * prior_loss
 
                     if self.n_gpu > 1:
-                        res_loss = res_loss.mean() # mean() to average on multi-gpu.
+                        # res_loss = res_loss.mean() # mean() to average on multi-gpu.
                         res_hpo_loss = res_hpo_loss.mean()
                         res_alpha_loss = res_alpha_loss.mean()
                         prior_loss = prior_loss.mean()
@@ -617,8 +622,11 @@ class UnsupervisedAnnotationController():
 
             # training on HPO descriptions firstly
             if global_step + base_step == 0:
-                for _ in range(1):
-                    _hpo_res(0.001, 1, percentage=1.0)
+                for _ in range(5):
+                    _hpo_res(0.01, 10, 0.01, percentage=1.0)
+
+            # _hpo_res(0.01, 10, 0.01, percentage=1.0)
+            # exit()
 
             tr_loss = 0
             tr_res_loss = 0
@@ -634,6 +642,14 @@ class UnsupervisedAnnotationController():
                 # alpha_out, all_hpo_latent_outputs = self.encoder(input_ids, segment_ids, input_mask)
                 # full_reconstructed_sequence = self.generator(alpha_out, all_hpo_latent_outputs, input_mask)
                 alpha_out, all_hpo_latent_outputs = self.encoder(input_ids, segment_ids, None)
+
+                # torch.set_printoptions(threshold=5000)
+                # tmp = F.softmax(alpha_out).unsqueeze(dim=-1)
+                # print(tmp)
+                # print(tmp.shape)
+                # print(alpha_out.shape)
+                # exit()
+
                 full_reconstructed_sequence = self.generator(alpha_out, all_hpo_latent_outputs, None)
 
                 res_loss = loss_function.resconstruction(full_reconstructed_sequence, input_ids)
@@ -685,16 +701,16 @@ class UnsupervisedAnnotationController():
                     # optimizer_prime.step()
                     # optimizer_prime.zero_grad()
 
-                if global_step > 0 and global_step % 100 == 0:
-                    _hpo_res(0.001, 1,
-                             percentage=0.2)
+                if global_step > 0 and global_step % 10 == 0:
+                    _hpo_res(0.1, 1, 0.1,
+                             percentage=0.02)
 
                 global_step += 1
 
                 ## Save a trained model
                 if is_train and (
                     global_step + base_step == 1 or
-                    global_step + base_step % config.save_step_4_unsupervised == 0
+                            (global_step + base_step) % config.save_step_4_unsupervised == 0
                 ):
                     logger.info("** ** * Saving model at step %d ** ** * " % (base_step + global_step))
                     model_to_save = self.encoder
@@ -898,8 +914,12 @@ if __name__ == '__main__':
     # supermodel.annotation_training(base_step=0, pretrained_base_model=360000)
 
     unsuperised_controller = UnsupervisedAnnotationController()
-    unsuperised_controller.train(base_step=0, is_train=True)
-    # unsuperised_controller.inference(base_step=80001, corpus_to_analysis='test')
-    # unsuperised_controller.inference(base_step=80001, corpus_to_analysis='train')
+    # unsuperised_controller.inference(base_step=75000, corpus_to_analysis='test')
+    # unsuperised_controller.inference(base_step=75000, corpus_to_analysis='train')
+    # unsuperised_controller.train(base_step=140000, is_train=True)
+    unsuperised_controller.train(base_step=1, is_train=True)
+
+    # TODO: mix hpo description with MIMIC
+    # TODO: change transformer to CNN
 
     pass
