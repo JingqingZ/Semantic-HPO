@@ -731,18 +731,35 @@ class UnsupervisedAnnotationHPODataset(Dataset):
         self.tokenizer = tokenizer
         self.seq_len = seq_len
 
+        max_num_successors = -1
+        for hpo_id in hpo_limited_list:
+            if len(hpo_children_info[hpo_id]) > max_num_successors:
+                max_num_successors = len(hpo_children_info[hpo_id])
+
         self.root_hpo_descriptions = [corpus_hpo_data[hpo] for hpo in hpo_limited_list]
         self.samples = list()
         self.index_of_samples = dict()
-        for hidx, hpo in enumerate(hpo_limited_list):
-            assert hpo not in self.index_of_samples
-            self.index_of_samples[hpo] = len(self.samples)
+        self.samples_with_duplication = list()
+        for hidx, hpo_id in enumerate(hpo_limited_list):
+
+            duplicated_factor = max_num_successors // len(hpo_children_info[hpo_id])
+
+            assert hpo_id not in self.index_of_samples
+            self.index_of_samples[hpo_id] = len(self.samples)
             sample = {
                 'root_hpo_idx': [hidx],
-                'description': corpus_hpo_data[hpo]
+                'description': corpus_hpo_data[hpo_id]
             }
+            self.samples_with_duplication += [len(self.samples)] * duplicated_factor
+
+            # print(max_num_successors)
+            # print(duplicated_factor)
+            # print(len(hpo_children_info[hpo_id]))
+            # print(self.samples_with_duplication)
+            # exit()
+
             self.samples.append(sample)
-            hpo_children = hpo_children_info[hpo]
+            hpo_children = hpo_children_info[hpo_id]
             for cnode in hpo_children:
                 if cnode not in self.index_of_samples:
                     self.index_of_samples[cnode] = len(self.samples)
@@ -750,14 +767,17 @@ class UnsupervisedAnnotationHPODataset(Dataset):
                         'root_hpo_idx': [hidx],
                         'description': corpus_hpo_data[cnode]
                     }
+                    self.samples_with_duplication += [len(self.samples)] * duplicated_factor
                     self.samples.append(sample)
                 else:
                     self.samples[self.index_of_samples[cnode]]["root_hpo_idx"].append(hidx)
 
     def __len__(self):
-        return len(self.samples)
+        # return len(self.samples)
+        return len(self.samples_with_duplication)
 
-    def __getitem__(self, item):
+    def __getitem__(self, index_of_sample):
+        item = self.samples_with_duplication[index_of_sample]
         text = self.samples[item]['description']
         root_hpo_idx = random.choice(self.samples[item]['root_hpo_idx'])
         root_hpo_text = self.root_hpo_descriptions[root_hpo_idx]

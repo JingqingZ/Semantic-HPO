@@ -3,6 +3,21 @@ import dataloader
 
 _set_of_hpos = set(dataloader.hpo_limited_list)
 
+def precision(set1, set2):
+    counter = 0
+    for s in set2:
+        if s in set1:
+            counter += 1
+    return counter / len(set2)
+
+
+def recall(set1, set2):
+    counter = 0
+    for s in set1:
+        if s in set2:
+            counter += 1
+    return counter / len(set1)
+
 # reference: https://en.wikipedia.org/wiki/Overlap_coefficient
 def overlap_coefficient(set1, set2):
     return len(set1 & set2) / min(len(set1), len(set2))
@@ -36,7 +51,6 @@ def _evaluate(list_of_set1, list_of_set2, func):
 
             score_dict[i] = overlap
 
-    '''
     sorted_score = sorted(score_dict.items(), key=lambda kv: kv[1])
 
     # worst case
@@ -54,7 +68,6 @@ def _evaluate(list_of_set1, list_of_set2, func):
         print(list_of_set1[sorted_score[-i][0]].split("/"))
         print(list_of_set2[sorted_score[-i][0]].split("/"))
         print("---")
-    '''
 
     print("Total num of records: %d" % len(list_of_set1))
     print("Total num of valid comparison: %d" % len(overlap_list))
@@ -199,6 +212,151 @@ def evaluate_unsupervised_method(column_of_keyword, threshold, decision_mode, fu
     else:
         raise Exception('Invalid mode')
 
+def combine_methods(list1, list2, func):
+
+    def _str_to_set(text):
+        if not isinstance(text, str):
+            return set()
+        return set(text.split("/"))
+
+    assert len(list1) == len(list2)
+
+    result_list = []
+    for idx in range(len(list1)):
+        set1 = _str_to_set(list1[idx])
+        set2 = _str_to_set(list2[idx])
+        comb_set = func(set1, set2)
+        result_list.append("/".join(comb_set))
+
+    return result_list
+
+def evaluate_ncbo_annotator(column_of_results="HPO_CODE_LIST_EHR_PHENO_PREDECESSORS_ONLY", func=jaccard, mode='complete'):
+    import config
+    import baselines
+    import decision
+
+    # silver = baselines.silver_standard()['HPO_CODE_LIST'].tolist()
+    keyword = baselines.keyword_search()['HPO_CODE_LIST_KEYWORD_SEARCH_PREDECESSORS_ONLY'].tolist()
+    ncbo = baselines.ehr_phenolyzer_ncbo_annotator()[column_of_results].tolist()
+    func = precision
+
+    silver = combine_methods(keyword, ncbo, func=lambda x, y: x & y)
+
+    assert len(silver) == len(ncbo)
+    assert len(silver) == config.total_num_mimic_record
+
+    if mode == 'train':
+        _evaluate(
+            [silver[index] for index in config.mimic_train_indices],
+            [ncbo[index] for index in config.mimic_train_indices],
+            func=func
+        )
+    elif mode == 'test':
+        _evaluate(
+            [silver[index] for index in config.mimic_test_indices],
+            [ncbo[index] for index in config.mimic_test_indices],
+            func=func
+        )
+    elif mode == 'all':
+        _evaluate(
+            silver, ncbo,
+            func=func
+        )
+    elif mode == "complete":
+        print("Training set")
+        _evaluate(
+            [silver[index] for index in config.mimic_train_indices],
+            [ncbo[index] for index in config.mimic_train_indices],
+            func=func
+        )
+        print("---------")
+        print("Testing set")
+        _evaluate(
+            [silver[index] for index in config.mimic_test_indices],
+            [ncbo[index] for index in config.mimic_test_indices],
+            func=func
+        )
+        print("---------")
+        print("Overall")
+        _evaluate(
+            silver, ncbo,
+            func=func
+        )
+    else:
+        raise Exception('Invalid mode')
+
+def evaluate_of_baselines(mode='test', comb_mode="union"):
+    import config
+    import baselines
+    import decision
+
+    # silver = baselines.silver_standard()['HPO_CODE_LIST'].tolist()
+    keyword = baselines.keyword_search()['HPO_CODE_LIST_KEYWORD_SEARCH_PREDECESSORS_ONLY'].tolist()
+    ncbo = baselines.ehr_phenolyzer_ncbo_annotator()["HPO_CODE_LIST_EHR_PHENO_PREDECESSORS_ONLY"].tolist()
+    obo = baselines.obo_annotator()["HPO_CODE_LIST_OBO_ANNO_PREDECESSORS_ONLY"].tolist()
+    all_baselines = [keyword, ncbo, obo]
+    name_baselines = ['keyword', 'ncbo', 'obo']
+    # func = precision
+
+    if comb_mode == "intersection":
+        comb_func = lambda x, y: x & y
+        func = precision
+    elif comb_mode == "union":
+        comb_func = lambda x, y: x | y
+        func = recall
+    else:
+        raise Exception("Invalid comb_mode")
+    silver = combine_methods(keyword, obo, func=comb_func)
+    silver = combine_methods(silver, ncbo, func=comb_func)
+
+    for pidx, prediction in enumerate(all_baselines):
+
+        print("===============")
+        print("SILVER (%s) vs. BASELINE (%s)" % (comb_mode, name_baselines[pidx]))
+
+        assert len(silver) == len(prediction)
+        assert len(silver) == config.total_num_mimic_record
+
+        if mode == 'train':
+            _evaluate(
+                [silver[index] for index in config.mimic_train_indices],
+                [prediction[index] for index in config.mimic_train_indices],
+                func=func
+            )
+        elif mode == 'test':
+            _evaluate(
+                [silver[index] for index in config.mimic_test_indices],
+                [prediction[index] for index in config.mimic_test_indices],
+                func=func
+            )
+        elif mode == 'all':
+            _evaluate(
+                silver, prediction,
+                func=func
+            )
+        elif mode == "complete":
+            print("Training set")
+            _evaluate(
+                [silver[index] for index in config.mimic_train_indices],
+                [prediction[index] for index in config.mimic_train_indices],
+                func=func
+            )
+            print("---------")
+            print("Testing set")
+            _evaluate(
+                [silver[index] for index in config.mimic_test_indices],
+                [prediction[index] for index in config.mimic_test_indices],
+                func=func
+            )
+            print("---------")
+            print("Overall")
+            _evaluate(
+                silver, prediction,
+                func=func
+            )
+        else:
+            raise Exception('Invalid mode')
+
 if __name__ == '__main__':
 
     '''
@@ -235,7 +393,7 @@ if __name__ == '__main__':
     evaluate_keyword_search(
         column_of_keyword='HPO_CODE_LIST_KEYWORD_SEARCH_PREDECESSORS_ONLY',
         func=jaccard,
-        mode='test'
+        mode='all'
     )
     # part of mimic
     # Training set
@@ -633,6 +791,14 @@ if __name__ == '__main__':
         mode="complete"
     )
     '''
+
+    # evaluate_ncbo_annotator(
+    #     mode='complete'
+    # )
+    # evaluate_of_baselines(
+    #     mode='test',
+    #     comb_mode='union'
+    # )
 
 
 

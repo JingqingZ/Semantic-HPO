@@ -13,13 +13,20 @@ class Loss():
 
     def resconstruction(self, logits, target_ids, mask=None):
         loss = F.cross_entropy(
-            logits.reshape(-1, logits.shape[-1]),
-            target_ids.reshape(-1)
+            logits.view(-1, logits.shape[-1]),
+            target_ids.view(-1)
         )
         return loss
 
     def alpha_cross_entropy(self, logits, target_logits, mask=None):
         loss = F.binary_cross_entropy_with_logits(
+            logits,
+            target_logits
+        )
+        return loss
+
+    def multi_label_cross_entropy(self, logits, target_logits):
+        loss = F.cross_entropy(
             logits,
             target_logits
         )

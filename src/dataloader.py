@@ -51,8 +51,16 @@ hpo_children_info_file = data_dir + "HPO/children.pickle"
 omim2hpo_file = data_dir + "HPO/omim2hpo.json"
 # ICD to OMIM mapping
 icd2omim_file = data_dir + "HPO/icd2omim.json"
+# ICD to full HPO silver mapping
+icd2full_hpo_file = data_dir + "HPO/icd2fullhpo.json"
+# ICD to limited HPO silver mapping
+icd2limited_hpo_file = data_dir + "HPO/icd2limitedhpo.json"
 # created by load_mimic()
 mimic_file = data_dir + "MIMIC/ready.csv"
+# created for the OboAnnotator
+mimic4oboannotator_folder = data_dir + "MIMIC/ready4oboannotator/"
+# created for the MetaMap
+mimic4metamap_folder = data_dir + "MetaMap/mimic4metamap/"
 # created get_corpus()
 text_corpus_mimic_file = data_dir + "corpus_mimic.txt"
 text_corpus_hpo_file = data_dir + "corpus_hpo.json"
@@ -61,8 +69,8 @@ vocab_file = data_dir + "vocab.txt"
 vocab_for_analysis_file = data_dir + "vocab4analysis.csv"
 # the mapping from rare disease to hpo
 # deprecated
-disease2hpo_map_file = data_dir + "disease2hpo.csv"
-icd2hpo_map_file = data_dir + "icd2hpo.csv"
+# disease2hpo_map_file = data_dir + "disease2hpo.csv"
+# icd2hpo_map_file = data_dir + "icd2hpo.csv"
 
 hpo_domains = [
     'name',
@@ -743,43 +751,74 @@ def get_icd_omim_mapping():
     return icd_omim_mapping
 
 def get_icd_hpo_silver_mapping():
-    icd2omim = get_icd_omim_mapping()
-    omim2hpo = get_omim_hpo_mapping()
-    icd2hpo = dict()
-    for icd in icd2omim:
-        for omim in icd2omim[icd]:
-            if omim in omim2hpo:
-                if icd not in icd2hpo:
-                    icd2hpo[icd] = set()
-                icd2hpo[icd].update(omim2hpo[omim])
+
+    if not os.path.exists(icd2full_hpo_file):
+        icd2omim = get_icd_omim_mapping()
+        omim2hpo = get_omim_hpo_mapping()
+        icd2hpo = dict()
+        for icd in icd2omim:
+            for omim in icd2omim[icd]:
+                if omim in omim2hpo:
+                    if icd not in icd2hpo:
+                        icd2hpo[icd] = set()
+                    icd2hpo[icd].update(omim2hpo[omim])
+
+        print("Saving ICD to full HPO silver mapping to %s" % icd2full_hpo_file)
+        with open(icd2full_hpo_file, 'w') as f:
+            tmp_icd2hpo = {k: list(icd2hpo[k]) for k in icd2hpo}
+            json.dump(tmp_icd2hpo, f)
+
+    else:
+        print("Loading ICD to full HPO silver mapping from %s" % icd2full_hpo_file)
+        with open(icd2full_hpo_file, 'r') as f:
+            icd2hpo = json.load(f)
+            icd2hpo = {k: set(icd2hpo[k]) for k in icd2hpo}
+
     return icd2hpo
 
 # if root_node == 'HP:0000118'
 # only the direct children nodes of 'HP:0000118' will be considered in all annotation
 def get_icd_hpo_in_limited_hpo_set(root_node=None):
-    hpo_data = get_hpo4dataset()
-    # po_onto = load_hpo_ontology()
-    # seed_node = hpo_onto[root_node]["relations"].get("can_be", [])
-    seed_node = hpo_limited_list
-    print(seed_node, len(seed_node))
 
-    node_mapping = dict()
-    for s in seed_node:
-        successors = hpo_data[s]["children_node"]
-        for c in successors:
-            # assert c not in node_mapping
-            if c not in node_mapping:
-                node_mapping[c] = set()
-            node_mapping[c].add(s)
+    if not os.path.exists(icd2limited_hpo_file):
 
-    icd2hpo = get_icd_hpo_silver_mapping()
-    new_icd2hpo = dict()
+        # hpo_data = get_hpo4dataset()
+        children_info = get_hpo_children_info()
+        # po_onto = load_hpo_ontology()
+        # seed_node = hpo_onto[root_node]["relations"].get("can_be", [])
+        seed_node = hpo_limited_list
+        print(seed_node, len(seed_node))
 
-    for icd in icd2hpo:
-        new_icd2hpo[icd] = set()
-        for hpo in icd2hpo[icd]:
-            if hpo in node_mapping:
-                new_icd2hpo[icd].update(node_mapping[hpo])
+        node_mapping = dict()
+        for s in seed_node:
+            # successors = hpo_data[s]["children_node"]
+            successors = children_info[s]
+            for c in successors:
+                # assert c not in node_mapping
+                if c not in node_mapping:
+                    node_mapping[c] = set()
+                node_mapping[c].add(s)
+
+        icd2hpo = get_icd_hpo_silver_mapping()
+        new_icd2hpo = dict()
+
+        for icd in icd2hpo:
+            new_icd2hpo[icd] = set()
+            for hpo in icd2hpo[icd]:
+                if hpo in node_mapping:
+                    new_icd2hpo[icd].update(node_mapping[hpo])
+
+        print("Saving ICD to limited HPO silver mapping to %s" % icd2limited_hpo_file)
+        with open(icd2limited_hpo_file, 'w') as f:
+            tmp_icd2hpo = {k: list(new_icd2hpo[k]) for k in new_icd2hpo}
+            json.dump(tmp_icd2hpo, f)
+
+    else:
+
+        print("Loading ICD to limited HPO silver mapping from %s" % icd2limited_hpo_file)
+        with open(icd2limited_hpo_file, 'r') as f:
+            new_icd2hpo = json.load(f)
+            new_icd2hpo = {k: set(new_icd2hpo[k]) for k in new_icd2hpo}
 
     return new_icd2hpo
 
@@ -792,6 +831,33 @@ def get_sentence_list_mimic(mimic_corpus_data):
         sentences_list += [l for l in lines if len(l) > 0]
     return sentences_list
 
+def convert_mimic_corpus_for_obo_annotator():
+    mimic_corpus, _ = get_corpus()
+
+    if not os.path.exists(mimic4oboannotator_folder):
+        os.makedirs(mimic4oboannotator_folder)
+
+    file_idx = 0
+    outfile = open(mimic4oboannotator_folder + "%d.txt" % file_idx, 'w')
+    for didx, doc in enumerate(tqdm(mimic_corpus)):
+        if (didx + 1) % 2000 == 0:
+            outfile.close()
+            file_idx += 1
+            outfile = open(mimic4oboannotator_folder + "%d.txt" % file_idx, 'w')
+        text = doc.replace("\n", " ")
+        outfile.write("%d\n%s\n\n" % (didx, text))
+    outfile.close()
+
+def convert_mimic_corpus_for_metamap():
+    mimic_corpus, _ = get_corpus()
+
+    if not os.path.exists(mimic4metamap_folder):
+        os.makedirs(mimic4metamap_folder)
+
+    for didx, doc in enumerate(tqdm(mimic_corpus)):
+        with open(mimic4metamap_folder + "%d.txt" % didx, 'w') as f:
+            text = doc.replace("\n", " ")
+            f.write(text + "\n")
 
 if __name__ == "__main__":
     ## the code here is used to test each function
@@ -801,9 +867,9 @@ if __name__ == "__main__":
     # hpo_desc = convert_hpo_to_flat_description()
     # load_mimic()
     # mimic_data, hpo_data = get_corpus(rebuild=True)
-    mimic_data, hpo_data = get_corpus(rebuild=False)
-    for hpo in hpo_limited_list:
-        print(hpo, hpo_data[hpo])
+    # mimic_data, hpo_data = get_corpus(rebuild=False)
+    # for hpo in hpo_limited_list:
+    #     print(hpo, hpo_data[hpo])
     # print(mimic_data[0])
     # print(hpo_data['HP:0001804'])
     # for d in data[-50000:]:
@@ -836,7 +902,7 @@ if __name__ == "__main__":
     # omim_hpo = get_omim_hpo_mapping()
     # icd2omim = get_icd_omim_mapping()
 
-    # icd2hpo = get_icd_hpo_silver_mapping()
+    icd2hpo = get_icd_hpo_silver_mapping()
     # hpo_subset = set()
     # for icd in icd2hpo:
     #     hpo_subset.update(icd2hpo[icd])
@@ -844,7 +910,7 @@ if __name__ == "__main__":
     # print(len(icd2hpo))
     # print(len(hpo_subset))
 
-    # new_icd2hpo = get_icd_hpo_in_limited_hpo_set("HP:0000118")
+    new_icd2hpo = get_icd_hpo_in_limited_hpo_set()
     # print(new_icd2hpo)
     # print(len(new_icd2hpo)) # 98
     # hpo_set = set()
@@ -853,6 +919,9 @@ if __name__ == "__main__":
     # print(len(hpo_set)) # 24
     # print(hpo_set)
     # print(np.mean([len(new_icd2hpo[icd]) for icd in new_icd2hpo])) # 8.102
+
+    # convert_mimic_corpus_for_obo_annotator()
+    # convert_mimic_corpus_for_metamap()
 
     # TODO: write a HPCC version of data processing
     pass

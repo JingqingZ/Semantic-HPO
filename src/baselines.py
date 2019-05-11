@@ -10,6 +10,7 @@ import mimic_proc
 silver_standard_results_file = config.outputs_results_dir + "silver_standard.csv"
 keyword_search_results_file = config.outputs_results_dir + "keyword_search.csv"
 ehr_phenolyzer_ncbo_results_file = config.outputs_results_dir + "ehr_pheno_ncbo.csv"
+obo_annotator_results_file = config.outputs_results_dir + "obo_annotator.csv"
 
 def silver_standard():
 
@@ -299,16 +300,16 @@ def topic_model():
     # TODO: use topic model and design a rule to connect topics with HPO
     pass
 
-def ehr_phenolyzer():
+def ehr_phenolyzer_ncbo_annotator():
 
-    # if not os.path.exists(ehr_phenolyzer_ncbo_results_file):
-    if True:
+    if not os.path.exists(ehr_phenolyzer_ncbo_results_file):
+    # if True:
         import sys
         PACKAGE_PARENT = '../baselines/EHR-Phenolyzer/'
         SCRIPT_DIR = os.path.dirname(os.path.realpath(os.path.join(os.getcwd(), os.path.expanduser(__file__))))
         sys.path.append(os.path.normpath(os.path.join(SCRIPT_DIR, PACKAGE_PARENT)))
 
-        # import ehr_phenolyzer
+        # import ehr_phenolyzer_ncbo_annotator
         import lib.pyncbo_annotator as ncbo_ann
 
         # corpus_mimic, _ = dataloader.get_corpus()
@@ -351,10 +352,10 @@ def ehr_phenolyzer():
                 if full_mimic_data.shape[0] == group_num * i:
                     break
                 mimic_data = full_mimic_data[i * group_num : ].copy(deep=True)
-                # list_hpo_results = ehr_phenolyzer.annotate(corpus_mimic[i * group_num : ], nlp_mode='NCBO')
+                # list_hpo_results = ehr_phenolyzer_ncbo_annotator.annotate(corpus_mimic[i * group_num : ], nlp_mode='NCBO')
             else:
                 mimic_data = full_mimic_data[i * group_num : (i + 1) * group_num].copy(deep=True)
-                # list_hpo_results = ehr_phenolyzer.annotate(corpus_mimic[i * group_num : (i + 1) * group_num], nlp_mode='NCBO')
+                # list_hpo_results = ehr_phenolyzer_ncbo_annotator.annotate(corpus_mimic[i * group_num : (i + 1) * group_num], nlp_mode='NCBO')
 
             # assert mimic_data.shape[0] == len(list_hpo_results)
 
@@ -380,6 +381,161 @@ def ehr_phenolyzer():
         new_mimic_data = pd.read_csv(ehr_phenolyzer_ncbo_results_file)
 
     return new_mimic_data
+
+def obo_annotator():
+    # NOTE: Please run OBO Annotator to process EHRs firstly
+    # paper link: https://www.ncbi.nlm.nih.gov/pmc/articles/PMC4207225/
+    # software link: http://www.usc.es/keam/PhenotypeAnnotation/
+    # intermediate results should be saved in ../data/OBOAnnotator/mimic_obo_annotator_results
+
+    if not os.path.exists(obo_annotator_results_file):
+
+        print("Aggregating results of OBO Annotator")
+
+        folder = "../data/OBOAnnotator/mimic_obo_annotator_results/"
+        aggregated_results = list()
+        for i in trange(27):
+            filename = folder + "%dCONCEPTS.csv" % i
+            with open(filename, 'r') as f:
+                content = f.read()
+            all_doc_results = content.split("\n\n\n")
+            for doc in all_doc_results:
+                line = [_ for _ in doc.split("\n") if len(_) > 0]
+                doc_id = int(line[0])
+                assert doc_id >= len(aggregated_results)
+                while doc_id > len(aggregated_results):
+                    aggregated_results.append("")
+                hpo_set = set(["HP:" + h.split(";")[0] for h in line[1:]])
+                hpo_str = "/".join(hpo_set)
+                aggregated_results.append(hpo_str)
+        assert len(aggregated_results) == config.total_num_mimic_record
+
+        children_info = dataloader.get_hpo_children_info()
+        children_to_predecessor = dict()
+        for hpo_id in dataloader.hpo_limited_list:
+            children = children_info[hpo_id]
+            for cnode in children:
+                if cnode not in children_to_predecessor:
+                    children_to_predecessor[cnode] = set()
+                children_to_predecessor[cnode].add(hpo_id)
+
+        def _convert_to_predecessor(hpo_list):
+            if isinstance(hpo_list, float):
+                return ""
+            new_hpo_set = set()
+            for hpo_id in hpo_list.split("/"):
+                if hpo_id not in children_to_predecessor:
+                    continue
+                new_hpo_set.update(children_to_predecessor[hpo_id])
+            return "/".join(new_hpo_set)
+
+        print("Finalizing results of OBO Annotator to CSV format")
+        mimic_data = dataloader.load_mimic()
+        mimic_data['HPO_CODE_LIST_OBO_ANNO'] = pd.Series(aggregated_results)
+        mimic_data['HPO_CODE_LIST_OBO_ANNO_PREDECESSORS_ONLY'] = mimic_data['HPO_CODE_LIST_OBO_ANNO'].apply(_convert_to_predecessor)
+
+        mimic_data = mimic_data[["ICD9_CODE_LIST",
+                                 "HPO_CODE_LIST_OBO_ANNO",
+                                 "HPO_CODE_LIST_OBO_ANNO_PREDECESSORS_ONLY",
+                                 "CLEAN_TEXT"]]
+        mimic_data.to_csv(obo_annotator_results_file)
+
+    else:
+        mimic_data = pd.read_csv(obo_annotator_results_file)
+
+    return mimic_data
+
+def ehr_phenolyzer_metamap():
+
+    # run this if necessary
+    # dataloader.convert_mimic_corpus_for_metamap()
+
+    import sys
+    PACKAGE_PARENT = '../baselines/EHR-Phenolyzer/'
+    SCRIPT_DIR = os.path.dirname(os.path.realpath(os.path.join(os.getcwd(), os.path.expanduser(__file__))))
+    sys.path.append(os.path.normpath(os.path.join(SCRIPT_DIR, PACKAGE_PARENT)))
+
+    from lib.pymetamap import run_metamap
+    from lib.hpo_obo import Obo
+    import distutils
+
+    # Please make sure Metamap is properly installed, license required
+    # register at UMLS Terminology Services and obtain appropriate license (https://uts.nlm.nih.gov//license.html)
+    # download "MetaMap 2016V2 Linux Version" from https://metamap.nlm.nih.gov/MainDownload.shtml
+    # following the MetaMap installation instruction (https://metamap.nlm.nih.gov/Installation.shtml)
+
+    metamap_bin_folder = "../baselines/public_mm/bin/" # Please make sure Metamap
+    if not (distutils.spawn.find_executable(metamap_bin_folder + "skrmedpostctl")):
+        print("Error: Metamap server skrmedpostctl not found. Please make sure Metamap is properly installed.")
+        sys.exit()
+    if not (distutils.spawn.find_executable(metamap_bin_folder + "metamap")):
+        print("Error: Metamap not found, please install Metamap. Please make sure Metamap is properly installed.")
+        sys.exit()
+
+    outdir = "../data/MetaMap/metamap_results/"
+    if not os.path.exists(outdir):
+        os.makedirs(outdir)
+
+    obofile = "../baselines/EHR-Phenolyzer/db/hp.obo"
+    op = Obo(obofile)
+    uid2name_dict = op.umls2name()
+    name2id_dict = op.name2id()
+
+    # TODO: START skrmedpostctl service
+    # command_line = metamap_bin_folder + "skrmedpostctl start"
+    # os.popen(command_line).read()
+    # TODO: STOP skrmedpostctl service
+
+    # for i in trange(config.total_num_mimic_record):
+
+    import threading
+    import math
+    import time
+    import datetime
+
+    class myThread(threading.Thread):
+        def __init__(self, tid, start_id, end_id):
+            threading.Thread.__init__(self)
+            self.tid = tid
+            self.start_id = start_id
+            self.end_id = end_id
+
+        def run(self):
+            total_num_doc = self.end_id - self.start_id
+            counter = 0
+            print("TID %s: started [%d, %d)" % (self.tid, self.start_id, self.end_id))
+            start_time = time.time()
+            for i in range(self.start_id, self.end_id):
+                input_filename = dataloader.mimic4metamap_folder + "%d.txt" % i
+                run_metamap(metamap_bin_folder, input_filename, "%d" % i, uid2name_dict, name2id_dict, outdir)
+                counter += 1
+                time_so_far = time.time() - start_time
+                time_estimated = time_so_far * total_num_doc / counter
+                print(
+                    "TID %s: %d in [%d, %d), %.4f, [%s/%s]" %
+                    (self.tid, i, self.start_id, self.end_id, counter / total_num_doc,
+                     datetime.timedelta(seconds=time_so_far),
+                     datetime.timedelta(seconds=time_estimated))
+                )
+            print("TID %s: finished [%d, %d)" % (self.tid, self.start_id, self.end_id))
+
+    num_thread = 7
+    each_thread = config.total_num_mimic_record // num_thread
+    list_of_thread = [
+        myThread(i, i * each_thread, (i + 1) * each_thread)
+        for i in range(num_thread)
+    ]
+    assert each_thread * num_thread <= config.total_num_mimic_record
+    if each_thread * num_thread < config.total_num_mimic_record:
+        list_of_thread.append(myThread(num_thread, num_thread * each_thread, config.total_num_mimic_record))
+
+    for t in list_of_thread:
+        t.start()
+
+    # for i in trange(100, config.total_num_mimic_record):
+    #     input_filename = dataloader.mimic4metamap_folder + "%d.txt" % i
+    #     run_metamap(metamap_bin_folder, input_filename, "%d" % i, uid2name_dict, name2id_dict, outdir)
+
 
 if __name__ == '__main__':
 
@@ -461,7 +617,9 @@ if __name__ == '__main__':
     # Avg HPO for those have 11
     # Median HPO for those have 11
 
-    mimic_data = ehr_phenolyzer()
+    # mimic_data = ehr_phenolyzer_ncbo_annotator()
+    # mimic_data = obo_annotator()
+    ehr_phenolyzer_metamap()
 
     pass
 

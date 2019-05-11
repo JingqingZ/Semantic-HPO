@@ -55,6 +55,7 @@ def results_of_alpha_out(threshold, mode):
     if True:
         test_sentence2alpha = load_sentence2alpha_mapping(corpus_to_analysis='test')
         train_sentence2alpha = load_sentence2alpha_mapping(corpus_to_analysis='train')
+        # train_sentence2alpha = {}
 
         sentence2alpha = {**train_sentence2alpha, **test_sentence2alpha}
         del train_sentence2alpha, test_sentence2alpha

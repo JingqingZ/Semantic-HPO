@@ -109,7 +109,7 @@ class Encoder(nn.Module):
         first_token_output = encoded_layers[-1][:, 0]
         alpha_output = self.hpo_dense(first_token_output)
         # alpha_output = self.hpo_softmax(self.hpo_activation(self.hpo_dense(first_token_output)))
-        # all_token_output = encoded_layers[-1].reshape(-1, self.config.max_seq_len * self.config.hidden_size)
+        # all_token_output = encoded_layers[-1].view(-1, self.config.max_seq_len * self.config.hidden_size)
         # alpha_output = self.hpo_activation(self.hpo_dense(all_token_output))
 
         all_hpo_latent_outputs = []
@@ -156,7 +156,7 @@ class Generator(nn.Module):
             F.sigmoid(alpha_inputs).unsqueeze(dim=-1)
             # F.softmax(alpha_inputs).unsqueeze(dim=-1)
         ).squeeze(dim=-1)
-        hidden_state = self.dense_latent(latent_prime).reshape([-1, self.config.max_seq_len, self.config.hidden_size])
+        hidden_state = self.dense_latent(latent_prime).view(-1, self.config.max_seq_len, self.config.hidden_size)
 
         if attention_mask is None:
             attention_mask = torch.ones(alpha_inputs.shape[0], self.config.max_seq_len)
@@ -173,15 +173,21 @@ class Generator(nn.Module):
         sequence_vocab_output = self.dense(sequence_output)
         return sequence_vocab_output
 
-class GeneratorPrime(nn.Module):
+class PriorConstraintModel(nn.Module):
 
     def __init__(self, config):
-        super(GeneratorPrime, self).__init__()
+        super(PriorConstraintModel, self).__init__()
         self.config = config
-        self.dense_latent = nn.Linear(config.hpo_hidden_size, config.max_seq_len * config.hidden_size)
-        self.decoder = BertEncoder(config)
-        self.dense = nn.Linear(config.hidden_size, config.vocab_size)
+        # self.dense_latent = nn.Linear(config.hpo_hidden_size, config.max_seq_len * config.hidden_size)
+        # self.decoder = BertEncoder(config)
+        # self.dense = nn.Linear(config.hidden_size, config.vocab_size)
         # self.activation = nn.Softmax(dim=-1)
+
+        self.conv1 = nn.Conv1d(1, 4, 8, stride=4)
+        self.conv2 = nn.Conv1d(4, 8, 4, stride=2)
+        self.conv3 = nn.Conv1d(8, 16, 2, stride=2)
+        self.dense = nn.Linear(16 * 95, config.num_hpo_node)
+
         self.apply(self.init_weights)
 
     def init_weights(self, module):
@@ -199,23 +205,34 @@ class GeneratorPrime(nn.Module):
 
     def forward(self, hpo_latent, attention_mask=None):
 
-        hidden_state = self.dense_latent(hpo_latent).reshape([-1, self.config.max_seq_len, self.config.hidden_size])
+        z = hpo_latent.unsqueeze(dim=1)
+        z = self.conv1(z)
+        z = F.relu(z)
+        z = self.conv2(z)
+        z = F.relu(z)
+        z = self.conv3(z)
+        z = F.relu(z)
+        z = z.view(z.shape[0], -1)
+        z = self.dense(z)
 
-        if attention_mask is None:
-            attention_mask = torch.ones(hpo_latent.shape[0], self.config.max_seq_len)
-            attention_mask = attention_mask.to(hpo_latent.device)
+        # hidden_state = self.dense_latent(hpo_latent).view(-1, self.config.max_seq_len, self.config.hidden_size)
 
-        extended_attention_mask = attention_mask.unsqueeze(1).unsqueeze(2)
-        extended_attention_mask = extended_attention_mask.to(dtype=next(self.parameters()).dtype) # fp16 compatibility
-        extended_attention_mask = (1.0 - extended_attention_mask) * -10000.0
+        # if attention_mask is None:
+        #     attention_mask = torch.ones(hpo_latent.shape[0], self.config.max_seq_len)
+        #     attention_mask = attention_mask.to(hpo_latent.device)
 
-        encoded_layers = self.decoder(hidden_state,
-                                      extended_attention_mask,
-                                      output_all_encoded_layers=False)
-        sequence_output = encoded_layers[-1]
+        # extended_attention_mask = attention_mask.unsqueeze(1).unsqueeze(2)
+        # extended_attention_mask = extended_attention_mask.to(dtype=next(self.parameters()).dtype) # fp16 compatibility
+        # extended_attention_mask = (1.0 - extended_attention_mask) * -10000.0
+
+        # encoded_layers = self.decoder(hidden_state,
+        #                               extended_attention_mask,
+        #                               output_all_encoded_layers=False)
+        # sequence_output = encoded_layers[-1]
         # sequence_vocab_output = self.activation(self.dense(sequence_output))
-        sequence_vocab_output = self.dense(sequence_output)
-        return sequence_vocab_output
+        # sequence_vocab_output = self.dense(sequence_output)
+        # return sequence_vocab_output
+        return z
 
 class CNNConfig(object):
     def __init__(self,
@@ -263,7 +280,7 @@ class EncoderCNN(nn.Module):
         conv_out = self.conv1(embeddings.permute(0, 2, 1))
         conv_out = self.conv2(conv_out)
         conv_out = self.conv3(conv_out)
-        conv_out = conv_out.reshape(-1, conv_out.shape[1] * conv_out.shape[2])
+        conv_out = conv_out.view(-1, conv_out.shape[1] * conv_out.shape[2])
 
         alpha_out = self.hpo_dense(conv_out)
         # alpha_out = self.hpo_activation(alpha_out)

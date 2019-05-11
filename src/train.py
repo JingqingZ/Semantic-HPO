@@ -1,5 +1,6 @@
 
 import os
+import random
 import logging
 from tqdm import tqdm, trange
 import numpy as np
@@ -12,6 +13,7 @@ from pytorch_pretrained_bert import BertConfig, BertTokenizer, BertForPreTrainin
 from pytorch_pretrained_bert import BertModel, BertForNextSentencePrediction, BertForSequenceClassification
 from pytorch_pretrained_bert.optimization import warmup_linear
 
+import utils
 import config
 import dataloader
 import models
@@ -388,36 +390,56 @@ class UnsupervisedAnnotationController():
         self.encoder.to(self.device)
         self.generator = models.Generator(self.config)
         self.generator.to(self.device)
-        self.generator_prime = models.GeneratorPrime(self.config)
-        self.generator_prime.to(self.device)
+        self.prior_constraint_model = models.PriorConstraintModel(self.config)
+        self.prior_constraint_model.to(self.device)
 
         if self.n_gpu > 1:
             self.encoder = torch.nn.DataParallel(self.encoder)
             self.generator = torch.nn.DataParallel(self.generator)
-            self.generator_prime = torch.nn.DataParallel(self.generator_prime)
+            self.prior_constraint_model = torch.nn.DataParallel(self.prior_constraint_model)
 
         ## restore model if applicable
         if base_step > 0:
             logger.info("** ** * Restoring model from step %d ** ** * " % base_step)
-            model_file = os.path.join(config.outputs_model_dir, "encoder_epoch%d.bin" % (base_step))
-            state_dict = torch.load(model_file)
-            self.encoder.load_state_dict(state_dict, strict=True)
-            model_file = os.path.join(config.outputs_model_dir, "generator_epoch%d.bin" % (base_step))
-            state_dict = torch.load(model_file)
-            self.generator.load_state_dict(state_dict, strict=True)
-            model_file = os.path.join(config.outputs_model_dir, "generator_prime_epoch%d.bin" % (base_step))
-            state_dict = torch.load(model_file)
-            self.generator_prime.load_state_dict(state_dict, strict=True)
+            success = False
+            encoder_model_file = os.path.join(config.outputs_model_dir, "encoder_epoch%d.bin" % (base_step))
+            generator_model_file = os.path.join(config.outputs_model_dir, "generator_epoch%d.bin" % (base_step))
+            prior_model_file = os.path.join(config.outputs_model_dir, "prior_constraint_model_epoch%d.bin" % (base_step))
+            try:
+                utils.load_model(self.encoder, encoder_model_file)
+                utils.load_model(self.generator, generator_model_file)
+                utils.load_model(self.prior_constraint_model, prior_model_file)
+                success = True
+            except:
+                pass
+            try:
+                utils.load_model_rm_module(self.encoder, encoder_model_file)
+                utils.load_model_rm_module(self.generator, generator_model_file)
+                utils.load_model_rm_module(self.prior_constraint_model, prior_model_file)
+                success = True
+            except:
+                pass
+            try:
+                utils.load_model_add_module(self.encoder, encoder_model_file)
+                utils.load_model_add_module(self.generator, generator_model_file)
+                utils.load_model_add_module(self.prior_constraint_model, prior_model_file)
+                success = True
+            except:
+                pass
+            if not success:
+                logger.error("FAIL TO LOAD MODEL ...")
+            else:
+                logger.info("MODELS RESTORED ...")
 
         ## weights
         no_decay = ['bias', 'LayerNorm.bias', 'LayerNorm.weight']
         encoder_weights = list(self.encoder.named_parameters())
         generator_weights = list(self.generator.named_parameters())
-        generator_prime_weights = list(self.generator_prime.named_parameters())
+        prior_constraint_model_weights = list(self.prior_constraint_model.named_parameters())
         
         # res_weights = encoder_weights + generator_weights
-        # pr_weights = encoder_weights + generator_prime_weights
-        all_weights = encoder_weights + generator_weights + generator_prime_weights
+        # pr_weights = encoder_weights + prior_constraint_model_weights
+        all_weights = encoder_weights + generator_weights + prior_constraint_model_weights
 
         # optimizer_grouped_res_weights = [
         #     {'params': [p for n, p in res_weights if not any(nd in n for nd in no_decay)], 'weight_decay': 0.01},
@@ -431,7 +453,6 @@ class UnsupervisedAnnotationController():
             {'params': [p for n, p in all_weights if not any(nd in n for nd in no_decay)], 'weight_decay': 0.01},
             {'params': [p for n, p in all_weights if any(nd in n for nd in no_decay)], 'weight_decay': 0.0}
         ]
-
 
         if not is_train:
             assert base_step > 0
@@ -525,16 +546,17 @@ class UnsupervisedAnnotationController():
         logger.info("***** Running %s *****" % ('training' if is_train else 'testing'))
         logger.info("  Num examples = %d", len(mimic_corpus_dataset))
         logger.info("  Batch size = %d", config.train_batch_size if is_train else config.test_batch_size)
-        logger.info("  Num steps = %d", total_num_steps)
+        logger.info("  MIMIC num step / epoch = %d", len(mimic_corpus_dataloader))
+        logger.info("  HPO num step / epoch = %d", len(hpo_corpus_dataloader))
 
         if is_train:
             self.encoder.train()
             self.generator.train()
-            self.generator_prime.train()
+            self.prior_constraint_model.train()
         else:
             self.encoder.eval()
             self.generator.eval()
-            self.generator_prime.eval()
+            self.prior_constraint_model.eval()
 
         hpo_ids = list()
         for hsample in hpo_root_dataset:
@@ -545,9 +567,9 @@ class UnsupervisedAnnotationController():
 
         for cur_epoch in range(total_num_epoch):
 
-            def _hpo_res(coefficient1, coefficient2, coefficient3, percentage=1.0):
+            def _hpo_res(cof1, cof2, cof3, cof4, percentage=1.0):
 
-                res_hpo_loss_agg = res_alpha_loss_agg = prior_loss_agg = 0
+                res_hpo_loss_agg = res_alpha_loss_agg = prior_loss_agg = vector_classify_loss_agg = 0
                 for step, batch in enumerate(hpo_corpus_dataloader):
 
                     batch = tuple(t.to(self.device) for t in batch)
@@ -560,8 +582,11 @@ class UnsupervisedAnnotationController():
                     full_reconstructed_sequence = self.generator(all_hpo_alpha, all_hpo_latent_outputs, None)
 
                     # torch.set_printoptions(threshold=5000)
-                    # print(F.sigmoid(alpha_out)[:10])
+                    # tmp = F.sigmoid(alpha_out)
+                    # print(tmp[:10])
                     # print(all_hpo_alpha[:10])
+                    # print(torch.argmax(tmp, dim=1))
+                    # print(torch.argmax(all_hpo_alpha, dim=1))
                     # exit()
 
                     res_hpo_loss = loss_function.resconstruction(full_reconstructed_sequence, input_ids)
@@ -569,31 +594,55 @@ class UnsupervisedAnnotationController():
 
                     #########
                     # prior constrain
+
+                    ## extract one hpo
+                    one_hpo_alpha_out = np.zeros(
+                        shape=alpha_out.shape
+                    ).astype(np.float32)
+
                     one_hpo_latent_outputs = np.zeros(
                         shape=[all_hpo_latent_outputs.size()[0], all_hpo_latent_outputs.size()[2]]
                     ).astype(np.float32)
-                    for i in range(one_hpo_id.shape[0]):
-                        one_hpo_latent_outputs[i] = all_hpo_latent_outputs[i][one_hpo_id[i]].detach().cpu().numpy()
-                    one_hpo_latent_outputs = torch.tensor(one_hpo_latent_outputs)
-                    one_hpo_latent_outputs.to(self.device)
 
-                    hpo_reconstructed_sequence = self.generator_prime(one_hpo_latent_outputs, None)
+                    for i in range(one_hpo_id.shape[0]):
+                        one_hpo_alpha_out[i][one_hpo_id[i]] = float(1)
+                        one_hpo_latent_outputs[i] = all_hpo_latent_outputs[i][one_hpo_id[i]].detach().cpu().numpy()
+
+                    one_hpo_alpha_out = torch.tensor(one_hpo_alpha_out)
+                    one_hpo_alpha_out = one_hpo_alpha_out.to(self.device)
+
+                    one_hpo_latent_outputs = torch.tensor(one_hpo_latent_outputs)
+                    one_hpo_latent_outputs = one_hpo_latent_outputs.to(self.device)
+                    ##
+
+                    latent_vector_classify_out = self.prior_constraint_model(one_hpo_latent_outputs, None)
+                    vector_classify_loss = loss_function.multi_label_cross_entropy(latent_vector_classify_out, one_hpo_id)
+
+                    hpo_reconstructed_sequence = self.generator(one_hpo_alpha_out, all_hpo_latent_outputs, None)
                     hpo_constrain_loss = loss_function.resconstruction(hpo_reconstructed_sequence, input_ids_hpos)
+
+                    # print(one_hpo_id)
+                    # print(one_hpo_alpha_out)
+                    # print(one_hpo_alpha_out.shape)
+                    # print(torch.argmax(one_hpo_alpha_out, dim=1))
+                    # exit()
 
                     prior_loss = hpo_constrain_loss
 
-                    loss = coefficient1 * res_hpo_loss + coefficient2 * res_alpha_loss + coefficient3 * prior_loss
+                    loss = cof1 * res_hpo_loss + cof2 * res_alpha_loss + cof3 * prior_loss + cof4 * vector_classify_loss
 
                     if self.n_gpu > 1:
                         # res_loss = res_loss.mean() # mean() to average on multi-gpu.
                         res_hpo_loss = res_hpo_loss.mean()
                         res_alpha_loss = res_alpha_loss.mean()
                         prior_loss = prior_loss.mean()
+                        vector_classify_loss = vector_classify_loss.mean()
                         loss = loss.mean()
 
                     res_hpo_loss_agg += res_hpo_loss.item()
                     res_alpha_loss_agg += res_alpha_loss.item()
                     prior_loss_agg += prior_loss.item()
+                    vector_classify_loss_agg += vector_classify_loss.item()
 
                     # training the reconstruction part
                     if is_train:
@@ -605,32 +654,34 @@ class UnsupervisedAnnotationController():
                         # optimizer_prime.step()
                         # optimizer_prime.zero_grad()
 
-                    if step > 0 and step % 100 == 0:
-                        logger.info("[HPO] E: %d, Step: %d, loss: %.4f / %.4f / %.4f" % (
+                    if (step > 0 or percentage > 0.99) and step % 100 == 0:
+                    # if step % 100 == 0:
+                        logger.info("[HPO] E: %d, Step: %d, loss: %.4f / %.4f / %.4f / %.4f" % (
                             cur_epoch, step, res_hpo_loss_agg / (step + 1), res_alpha_loss_agg / (step + 1),
-                            prior_loss_agg / (step + 1)
+                            prior_loss_agg / (step + 1), vector_classify_loss_agg / (step + 1)
                         ))
 
                     if step > len(hpo_corpus_dataloader) * percentage:
                         break
 
                 if global_step % 100 == 0:
-                    logger.info("[HPO] E: %d, Step: %d, loss: %.4f / %.4f / %.4f" % (
+                    logger.info("[HPO] E: %d, Step: %d, loss: %.4f / %.4f / %.4f / %.4f" % (
                         cur_epoch, step, res_hpo_loss_agg / (step + 1), res_alpha_loss_agg / (step + 1),
-                        prior_loss_agg / (step + 1)
+                        prior_loss_agg / (step + 1), vector_classify_loss_agg / (step + 1)
                     ))
 
             # training on HPO descriptions firstly
             if global_step + base_step == 0:
-                for _ in range(5):
-                    _hpo_res(0.01, 10, 0.01, percentage=1.0)
+                for _ in range(1):
+                    _hpo_res(0.01, 10, 0.01, 2, percentage=1.0)
 
-            # _hpo_res(0.01, 10, 0.01, percentage=1.0)
+            # _hpo_res(0.01, 10, 0.01, 2, percentage=1.0)
             # exit()
 
             tr_loss = 0
             tr_res_loss = 0
             tr_phe_loss = 0
+            tr_vcl_loss = 0
             nb_tr_examples, nb_tr_steps = 0, 0
 
             for step, batch in enumerate(tqdm(mimic_corpus_dataloader, desc="MIMIC Iter")):
@@ -643,12 +694,25 @@ class UnsupervisedAnnotationController():
                 # full_reconstructed_sequence = self.generator(alpha_out, all_hpo_latent_outputs, input_mask)
                 alpha_out, all_hpo_latent_outputs = self.encoder(input_ids, segment_ids, None)
 
-                # torch.set_printoptions(threshold=5000)
-                # tmp = F.softmax(alpha_out).unsqueeze(dim=-1)
-                # print(tmp)
-                # print(tmp.shape)
-                # print(alpha_out.shape)
-                # exit()
+                '''
+                # TODO: comment this
+                torch.set_printoptions(threshold=5000)
+                tmp = F.sigmoid(alpha_out)
+                print(tmp[:10])
+                print(torch.argmax(tmp, dim=1))
+                counter = [0] * len(dataloader.hpo_limited_list)
+                for i in range(tmp.shape[0]):
+                    list_indices = list()
+                    for j in range(tmp.shape[1]):
+                        if tmp[i, j] > 0.1:
+                            counter[j] += 1
+                print(alpha_out.shape)
+                hpo_children_info = dataloader.get_hpo_children_info()
+                for i in range(len(counter)):
+                    print(i, dataloader.hpo_limited_list[i], counter[i],
+                          len(hpo_children_info[dataloader.hpo_limited_list[i]]))
+                exit()
+                '''
 
                 full_reconstructed_sequence = self.generator(alpha_out, all_hpo_latent_outputs, None)
 
@@ -656,41 +720,69 @@ class UnsupervisedAnnotationController():
 
                 ##########
                 # prior constraint
-                # randomly select hpos
-                which_hpo = np.random.randint(low=0, high=len(dataloader.hpo_limited_list), size=(alpha_out.shape[0]))
+
+                ## randomly select one hpo
+                # which_hpo = np.random.randint(low=0, high=len(dataloader.hpo_limited_list), size=(alpha_out.shape[0]))
+                which_hpo = np.array([random.randrange(0, len(dataloader.hpo_limited_list)) for _ in range(alpha_out.shape[0])])
+
+                one_hpo_alpha_out = np.zeros(
+                    shape=alpha_out.shape
+                ).astype(np.float32)
+
                 one_hpo_latent_outputs = np.zeros(
                     shape=[all_hpo_latent_outputs.size()[0], all_hpo_latent_outputs.size()[2]]
                 ).astype(np.float32)
+
                 hpo_input_ids = list()
+
                 for i in range(which_hpo.shape[0]):
+                    one_hpo_alpha_out[i][which_hpo[i]] = float(1)
                     one_hpo_latent_outputs[i] = all_hpo_latent_outputs[i][which_hpo[i]].detach().cpu().numpy()
                     hpo_input_ids.append(hpo_ids[which_hpo[i]])
-                one_hpo_latent_outputs = torch.tensor(one_hpo_latent_outputs)
-                one_hpo_latent_outputs.to(self.device)
+
+                which_hpo = torch.tensor(which_hpo)
+                which_hpo = which_hpo.to(self.device)
+                one_hpo_alpha_out = torch.tensor(one_hpo_alpha_out)
+                one_hpo_alpha_out = one_hpo_alpha_out.to(self.device)
                 hpo_input_ids = torch.stack(hpo_input_ids, dim=0)
                 hpo_input_ids = hpo_input_ids.to(self.device)
+                one_hpo_latent_outputs = torch.tensor(one_hpo_latent_outputs)
+                one_hpo_latent_outputs = one_hpo_latent_outputs.to(self.device)
+                ##
 
-                hpo_reconstructed_sequence = self.generator_prime(one_hpo_latent_outputs, None)
+                # print(which_hpo)
+                # print(which_hpo.shape)
+                # print(one_hpo_alpha_out)
+                # print(torch.argmax(one_hpo_alpha_out, dim=1))
+                # print(one_hpo_alpha_out.shape)
+                # print(one_hpo_latent_outputs.shape)
+                # print(hpo_input_ids.shape)
 
+                latent_vector_classify_out = self.prior_constraint_model(one_hpo_latent_outputs, None)
+                vector_classify_loss = loss_function.multi_label_cross_entropy(latent_vector_classify_out, which_hpo)
+
+                hpo_reconstructed_sequence = self.generator(one_hpo_alpha_out, all_hpo_latent_outputs, None)
                 pr_loss = loss_function.resconstruction(hpo_reconstructed_sequence, hpo_input_ids)
 
-                loss = res_loss + pr_loss
+                loss = res_loss + pr_loss + vector_classify_loss
 
                 if self.n_gpu > 1:
                     loss = loss.mean() # mean() to average on multi-gpu.
                     res_loss = res_loss.mean()
                     pr_loss = pr_loss.mean()
+                    vector_classify_loss = vector_classify_loss.mean()
 
                 tr_loss += loss.item()
                 tr_res_loss += res_loss.item()
                 tr_phe_loss += pr_loss.item()
+                tr_vcl_loss += vector_classify_loss.item()
                 nb_tr_examples += input_ids.size(0)
                 nb_tr_steps += 1
 
                 if global_step % config.print_step_unsupervised == 0:
-                    logger.info("[MIMIC] E: %d, Step: %d, Total Step: %d, loss: %.4f / %.4f" % (
+                    logger.info("[MIMIC] E: %d, Step: %d, Total Step: %d, loss: %.4f / %.4f / %.4f" % (
                         cur_epoch, global_step, global_step + base_step,
-                        tr_res_loss / nb_tr_steps, tr_phe_loss / nb_tr_steps))
+                        tr_res_loss / nb_tr_steps, tr_phe_loss / nb_tr_steps, tr_vcl_loss / nb_tr_steps))
 
                 if is_train:
                     loss.backward()
@@ -702,8 +794,8 @@ class UnsupervisedAnnotationController():
                     # optimizer_prime.zero_grad()
 
                 if global_step > 0 and global_step % 10 == 0:
-                    _hpo_res(0.1, 1, 0.1,
-                             percentage=0.02)
+                    _hpo_res(0.1, 1, 0.1, 0.1,
+                             percentage=0.01)
 
                 global_step += 1
 
@@ -721,8 +813,8 @@ class UnsupervisedAnnotationController():
                     output_model_file = os.path.join(config.outputs_model_dir, "generator_epoch%d.bin" %
                                                      (base_step + global_step))
                     torch.save(model_to_save.state_dict(), output_model_file)
-                    model_to_save = self.generator_prime
-                    output_model_file = os.path.join(config.outputs_model_dir, "generator_prime_epoch%d.bin" %
+                    model_to_save = self.prior_constraint_model
+                    output_model_file = os.path.join(config.outputs_model_dir, "prior_constraint_model_epoch%d.bin" %
                                                      (base_step + global_step))
                     torch.save(model_to_save.state_dict(), output_model_file)
 
@@ -848,6 +940,26 @@ class UnsupervisedAnnotationController():
             alpha_out, all_hpo_latent_outputs = self.encoder(input_ids, segment_ids, None)
             # reconstructed_sequence = self.generator(alpha_out, all_hpo_latent_outputs, None)
 
+            '''
+            # TODO: comment this
+            torch.set_printoptions(threshold=5000)
+            tmp = F.sigmoid(alpha_out)
+            print(tmp[:10])
+            print(torch.argmax(tmp, dim=1))
+            counter = [0] * len(dataloader.hpo_limited_list)
+            for i in range(tmp.shape[0]):
+                list_indices = list()
+                for j in range(tmp.shape[1]):
+                    if tmp[i, j] > 0.1:
+                        counter[j] += 1
+            print(alpha_out.shape)
+            hpo_children_info = dataloader.get_hpo_children_info()
+            for i in range(len(counter)):
+                print(i, dataloader.hpo_limited_list[i], counter[i],
+                      len(hpo_children_info[dataloader.hpo_limited_list[i]]))
+            exit()
+            '''
+
             mimic_alpha_results.append(alpha_out.detach().cpu())
 
             '''
@@ -916,8 +1028,12 @@ if __name__ == '__main__':
     unsuperised_controller = UnsupervisedAnnotationController()
     # unsuperised_controller.inference(base_step=75000, corpus_to_analysis='test')
     # unsuperised_controller.inference(base_step=75000, corpus_to_analysis='train')
+    # unsuperised_controller.inference(base_step=10000, corpus_to_analysis='test')
     # unsuperised_controller.train(base_step=140000, is_train=True)
-    unsuperised_controller.train(base_step=1, is_train=True)
+    # unsuperised_controller.train(base_step=1, is_train=True)
+    # unsuperised_controller.train(base_step=1, is_train=True)
+    unsuperised_controller.inference(base_step=55000, corpus_to_analysis='test')
+    unsuperised_controller.inference(base_step=55000, corpus_to_analysis='train')
 
     # TODO: mix hpo description with MIMIC
     # TODO: change transformer to CNN

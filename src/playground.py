@@ -432,6 +432,25 @@ def analyze_specific_case(doc_id):
     print(sorted(keyword))
     print(evaluation.jaccard(set(silver), set(keyword)))
 
+def analyze_num_children_node_hpo():
+    children_info = dataloader.get_hpo_children_info()
+    for idx, hpo_id in enumerate(dataloader.hpo_limited_list):
+        print(idx, hpo_id, len(children_info[hpo_id]))
+
+def analyze_ehr_pheno_ncbo_results():
+    ncbo_data = baselines.ehr_phenolyzer_ncbo_annotator()
+
+    ncbo = ncbo_data["HPO_CODE_LIST_EHR_PHENO_PREDECESSORS_ONLY"].tolist()
+
+    counter = 0
+    for hpostr in ncbo:
+        if isinstance(hpostr, float):
+            continue
+        if len(hpostr.split("/")) == 0:
+            continue
+        counter += 1
+    print(counter, len(ncbo))
+
 
 if __name__ == '__main__':
     # icd_distribution_in_mimic()
@@ -461,7 +480,9 @@ if __name__ == '__main__':
     # hpo_description_optimization()
     # convert_mimic_to_plain_text()
     # analyze_ehr_phenolyzer_results()
-    analyze_specific_case(708)
+    analyze_specific_case(385)
     # hpodata = dataloader.get_hpo4dataset()
     # print(hpodata['HP:0000408']['terms'])
+    # analyze_num_children_node_hpo()
+    # analyze_ehr_pheno_ncbo_results()
     pass
