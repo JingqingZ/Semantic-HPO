@@ -9,7 +9,7 @@
     - `['HP:0001871', 'HP:0001626', 'HP:0025142', 'HP:0000707', 'HP:0002715']`
     - This is an example of worst case. `385` is the EHR id. `0.0` is the Jaccard.
     - The first line is the results of ICD->HPO. (unsorted)
-    - The second line is the results of keyword searomim2hpo.jsonch. (unsorted)
+    - The second line is the results of keyword search. (unsorted)
     - Check code `evaluate_keyword_search()` in `src/evaluation.py` for details.
     - Files:
         - `outputs/results/silver_standard.csv` for ICD->HPO results
