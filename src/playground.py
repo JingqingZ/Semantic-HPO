@@ -451,6 +451,226 @@ def analyze_ehr_pheno_ncbo_results():
         counter += 1
     print(counter, len(ncbo))
 
+def analyze_threshold():
+
+    import mimic_proc
+
+    train_sentence2alpha = decision.load_sentence2alpha_mapping(corpus_to_analysis='train')
+    # test_sentence2alpha = decision.load_sentence2alpha_mapping(corpus_to_analysis='test')
+    test_sentence2alpha = {}
+
+    sentence2alpha = {**train_sentence2alpha, **test_sentence2alpha}
+    del train_sentence2alpha, test_sentence2alpha
+
+    mimic_data = dataloader.load_mimic()
+    mimic_text = mimic_data["CLEAN_TEXT"].tolist()
+
+    ncbo_data = baselines.ehr_phenolyzer_ncbo_annotator()
+    ncbo_results = ncbo_data["HPO_CODE_LIST_EHR_PHENO_PREDECESSORS_ONLY"].tolist()
+
+    limited_hpo_dict = dict()
+    for idx, hpo_id in enumerate(dataloader.hpo_limited_list):
+        limited_hpo_dict[hpo_id] = idx
+
+    ncbo_results = [set([limited_hpo_dict[hpo_id] for hpo_id in hpostr.split("/")]) if isinstance(hpostr, str) else set() for hpostr in ncbo_results]
+
+
+    hpo_alpha_positive = []
+    hpo_alpha_negative = []
+    for _ in dataloader.hpo_limited_list:
+        hpo_alpha_negative.append([])
+        hpo_alpha_positive.append([])
+
+    for ehr_idx, ehr in enumerate(tqdm(mimic_text[:1000])):
+        ehr_sentences = mimic_proc.get_sentences_from_mimic(ehr)
+
+        alpha_results_list = list()
+
+        for sent in ehr_sentences:
+            if sent not in sentence2alpha:
+                continue
+            alpha_results_list.append(sentence2alpha[sent])
+        if len(alpha_results_list) == 0:
+            continue
+        alpha_results_list = np.stack(alpha_results_list, axis=0)
+
+        alpha_results_list = np.max(alpha_results_list, axis=0)
+        assert alpha_results_list.shape[0] == len(dataloader.hpo_limited_list)
+
+        for hidx in range(len(dataloader.hpo_limited_list)):
+            if hidx in ncbo_results[ehr_idx]:
+                hpo_alpha_positive[hidx].append(alpha_results_list[hidx])
+            else:
+                hpo_alpha_negative[hidx].append(alpha_results_list[hidx])
+
+    for hidx in range(len(dataloader.hpo_limited_list)):
+        print("===========")
+        print(hidx, dataloader.hpo_limited_list[hidx])
+        print("positive: %.3f %.3f %.3f" % (
+            np.max(hpo_alpha_positive[hidx]),
+            np.mean(hpo_alpha_positive[hidx]),
+            np.min(hpo_alpha_positive[hidx])
+        ))
+        print("negative: %.3f %.3f %.3f" % (
+            np.max(hpo_alpha_negative[hidx]),
+            np.mean(hpo_alpha_negative[hidx]),
+            np.min(hpo_alpha_negative[hidx])
+        ))
+
+def analyze_appearance_of_hpo(topk):
+
+    children_info = dataloader.get_hpo_children_info()
+
+    silver = evaluation.get_icd2hpo_3digit_results()
+    '''
+    threshold=[
+                  0.3, 0.4, 0.2, 0.8,
+                  0.4, 0.65, 0.4, 0.1,
+                  0.85, 0.4, 0.2, 0.04,
+                  0.01, 0.7, 0.4, 0.02,
+                  0.7, 0.05, 0.4, 0.8,
+                  0.2, 0.5, 0.6, 0.6
+              ]
+    '''
+    threshold=[
+        0.3, 0.35, 0.08, 0.7,
+        0.4, 0.7, 0.25, 0.1,
+        0.85, 0.4, 0.2, 0.03,
+        0.01, 0.7, 0.4, 0.02,
+        0.85, 0.05, 0.4, 0.8,
+        0.15, 0.55, 0.65, 0.6
+    ]
+    '''
+    threshold = [
+        0.308, 0.378, 0.229, 0.968,
+        0.727, 0.595, 0.288, 0.031,
+        0.577, 0.713, 0.315, 0.056,
+        0.002, 0.531, 0.689, 0.003,
+        0.557, 0.059, 0.479, 0.806,
+        0.093, 0.571, 0.685, 0.554
+    ]
+    '''
+
+    column_of_keyword="HPO_CODE_LIST_UNSUPERVISED_METHOD_PREDECESSORS_ONLY"
+
+    decision_mode = 'var_threshold'
+    # threshold = analyze_alpha()
+    unsuper = decision.results_of_alpha_out(threshold=threshold, mode=decision_mode)[column_of_keyword].tolist()
+    return unsuper
+
+    # unsuper = decision.results_of_alpha_out_norm_topk(topk)[column_of_keyword].tolist()
+
+    if config._global_verbose_print:
+        utils.print_statictis_of_hpo(silver)
+        utils.print_statictis_of_hpo(unsuper)
+
+    '''
+    evaluation._evaluate(
+        [silver[index] for index in config.mimic_train_indices],
+        [unsuper[index] for index in config.mimic_train_indices],
+        func=evaluation.jaccard
+    )
+    evaluation._evaluate(
+        [silver[index] for index in config.mimic_train_indices],
+        [unsuper[index] for index in config.mimic_train_indices],
+        func=evaluation.overlap_coefficient
+    )
+    '''
+
+    evaluation._evaluate(
+        [silver[index] for index in config.mimic_test_indices],
+        [unsuper[index] for index in config.mimic_test_indices],
+        func=evaluation.jaccard
+    )
+    evaluation._evaluate(
+        [silver[index] for index in config.mimic_test_indices],
+        [unsuper[index] for index in config.mimic_test_indices],
+        func=evaluation.overlap_coefficient
+    )
+
+    counter_silver = [0] * len(dataloader.hpo_limited_list)
+    counter_unsuper = [0] * len(dataloader.hpo_limited_list)
+
+    hpo2hpoidx = {hpo: hidx for hidx, hpo in enumerate(dataloader.hpo_limited_list)}
+
+    assert len(silver) == len(unsuper)
+    for i in range(len(silver)):
+        if not isinstance(silver[i], str) or not isinstance(unsuper[i], str):
+            continue
+        silver_hpolist = [s for s in silver[i].split("/") if len(s) > 0]
+        unsuper_hpolist = [s for s in unsuper[i].split("/") if len(s) > 0]
+
+        for hpo in silver_hpolist:
+            counter_silver[hpo2hpoidx[hpo]] += 1
+        for hpo in unsuper_hpolist:
+            counter_unsuper[hpo2hpoidx[hpo]] += 1
+
+    for hidx in range(len(dataloader.hpo_limited_list)):
+        if config._global_verbose_print:
+            print(hidx, dataloader.hpo_limited_list[hidx], counter_silver[hidx], counter_unsuper[hidx], len(children_info[dataloader.hpo_limited_list[hidx]]))
+
+def analyze_alpha():
+
+    with open(config.outputs_results_dir + "mimic_alpha_%s_55000.npy" % 'train', 'rb') as f:
+        mimic_alpha_train_results = np.load(f)
+
+    new_threshold = []
+    for i in range(len(dataloader.hpo_limited_list)):
+        hpo_alpha = utils.sigmoid(mimic_alpha_train_results[:, i])
+        mean = np.mean(hpo_alpha)
+        std = np.std(hpo_alpha)
+        normalized_hpo_alpha = (hpo_alpha - mean) / std
+        # print((threshold[i] - mean) / std)
+        # print(np.mean(normalized_hpo_alpha))
+        # print(np.std(normalized_hpo_alpha))
+        nt = 1.28 * std + mean
+        # nt = 1.04 * std + mean
+        # nt = 0.84 * std + mean
+        # nt = 0.53 * std + mean
+        new_threshold.append(nt)
+        # print("----")
+
+    if config._global_verbose_print:
+        print(", ".join(["%.3f" % nt for nt in new_threshold]) )
+    return new_threshold
+
+def analyze_alpha_2():
+
+    with open(config.outputs_results_dir + "mimic_alpha_%s_55000.npy" % 'train', 'rb') as f:
+        mimic_alpha_train_results = np.load(f)
+
+    threshold=[
+        0.3, 0.35, 0.08, 0.7,
+        0.4, 0.7, 0.25, 0.1,
+        0.85, 0.4, 0.2, 0.03,
+        0.01, 0.7, 0.4, 0.02,
+        0.85, 0.05, 0.4, 0.8,
+        0.15, 0.55, 0.65, 0.6
+    ]
+
+    silver = evaluation.get_icd2hpo_3digit_results()
+    counter_silver = [0] * len(dataloader.hpo_limited_list)
+
+    hpo2hpoidx = {hpo: hidx for hidx, hpo in enumerate(dataloader.hpo_limited_list)}
+
+    for i in range(len(silver)):
+        if not isinstance(silver[i], str):
+            continue
+        silver_hpolist = [s for s in silver[i].split("/") if len(s) > 0]
+
+        for hpo in silver_hpolist:
+            counter_silver[hpo2hpoidx[hpo]] += 1
+
+    for i in range(len(dataloader.hpo_limited_list)):
+        hpo_alpha = utils.sigmoid(mimic_alpha_train_results[:, i])
+        mean = np.mean(hpo_alpha)
+        std = np.std(hpo_alpha)
+        normalized_hpo_alpha = (hpo_alpha - mean) / std
+
+        position = (threshold[i] - mean) / std
+        percent = counter_silver[i] / config.total_num_mimic_record
+        p = "%2d %.3f %.3f %.3f %.3f" % (i, threshold[i], position, percent, percent / position)
+        print(p)
 
 if __name__ == '__main__':
     # icd_distribution_in_mimic()
@@ -480,9 +700,70 @@ if __name__ == '__main__':
     # hpo_description_optimization()
     # convert_mimic_to_plain_text()
     # analyze_ehr_phenolyzer_results()
-    analyze_specific_case(385)
+    # analyze_specific_case(385)
     # hpodata = dataloader.get_hpo4dataset()
     # print(hpodata['HP:0000408']['terms'])
     # analyze_num_children_node_hpo()
     # analyze_ehr_pheno_ncbo_results()
+
+    # analyze_threshold()
+    # exit()
+
+    # ncbo = baselines.ehr_phenolyzer_ncbo_annotator()
+    # obo = baselines.obo_annotator()
+
+    # ncbo = ncbo[[
+    #     "ICD9_CODE_LIST",
+    #     "HPO_CODE_LIST_EHR_PHENO",
+    #     "HPO_CODE_LIST_EHR_PHENO_PREDECESSORS_ONLY",
+    # ]]
+    # obo = obo[[
+    #     "ICD9_CODE_LIST",
+    #     "HPO_CODE_LIST_OBO_ANNO",
+    #     "HPO_CODE_LIST_OBO_ANNO_PREDECESSORS_ONLY",
+    # ]]
+
+    # ncbo.to_csv("ncbo.csv")
+    # obo.to_csv("obo.csv")
+
+    # candidate_icd = ['401', '272', '276', '285', '410']
+    # icd2limitedhpo_mapping = dataloader.get_3digit_icd_hpo_in_limited_hpo_set()
+    # for icd in candidate_icd:
+    #     print(icd, sorted(icd2limitedhpo_mapping[icd]))
+
+    '''
+    children_info = dataloader.get_hpo_children_info()
+    hposet = set()
+    for hpo in dataloader.hpo_limited_list:
+        # hposet.add(hpo)
+        hposet.update(children_info[hpo])
+    print(len(hposet))
+    exit()
+    '''
+
+    # analyze_appearance_of_hpo(8)
+
+    # analyze_alpha()
+    analyze_alpha_2()
+
+    '''
+    silver = evaluation.get_icd2hpo_3digit_results()
+    counter = 0
+    for hpostr in silver:
+        if not isinstance(hpostr, str) or len(hpostr) == 0:
+            continue
+        counter += 1
+    print(counter, len(silver))
+    '''
+
+    '''
+    icd2limitedhpo_mapping = dataloader.get_3digit_icd_hpo_in_limited_hpo_set()
+    print(len(icd2limitedhpo_mapping))
+    counter = 0
+    for icd in icd2limitedhpo_mapping:
+        counter += len(icd2limitedhpo_mapping[icd])
+    print(counter)
+    '''
+
+
     pass

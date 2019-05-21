@@ -726,7 +726,7 @@ class UnsupervisedAnnotationMIMICDataset(Dataset):
         return cur_tensors
 
 class UnsupervisedAnnotationHPODataset(Dataset):
-    def __init__(self, hpo_limited_list, hpo_children_info, corpus_hpo_data, tokenizer, seq_len=config.sequence_length // 2):
+    def __init__(self, hpo_limited_list, hpo_children_info, corpus_hpo_data, tokenizer, seq_len=config.sequence_length // 2, duplication=True):
         self.vocab = tokenizer.vocab
         self.tokenizer = tokenizer
         self.seq_len = seq_len
@@ -742,11 +742,15 @@ class UnsupervisedAnnotationHPODataset(Dataset):
         self.samples_with_duplication = list()
         for hidx, hpo_id in enumerate(hpo_limited_list):
 
-            duplicated_factor = max_num_successors // len(hpo_children_info[hpo_id])
+            if duplication:
+                duplicated_factor = max_num_successors // len(hpo_children_info[hpo_id])
+            else:
+                duplicated_factor = 1
 
             assert hpo_id not in self.index_of_samples
             self.index_of_samples[hpo_id] = len(self.samples)
             sample = {
+                'self_hpo_idx': hpo_id,
                 'root_hpo_idx': [hidx],
                 'description': corpus_hpo_data[hpo_id]
             }
@@ -764,6 +768,7 @@ class UnsupervisedAnnotationHPODataset(Dataset):
                 if cnode not in self.index_of_samples:
                     self.index_of_samples[cnode] = len(self.samples)
                     sample = {
+                        'self_hpo_idx': cnode,
                         'root_hpo_idx': [hidx],
                         'description': corpus_hpo_data[cnode]
                     }

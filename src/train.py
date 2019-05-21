@@ -373,24 +373,30 @@ class UnsupervisedAnnotationController():
             hpo_hidden_size=1536,
             vocab_size=len(self.tokenizer.vocab)
         )
-        # self.config = models.CNNConfig(
-        #     embed_hidden_size=512,
-        #     max_position_embeddings=512,
-        #     max_seq_len=32,
-        #     num_hpo_node=len(dataloader.hpo_limited_list),
-        #     hpo_hidden_size=512,
-        #     vocab_size=len(self.tokenizer.vocab)
-        # )
+        # TODO: CNN
+        self.cnnconfig = models.CNNConfig(
+            embed_hidden_size=768,
+            max_position_embeddings=512,
+            max_seq_len=32,
+            num_hpo_node=len(dataloader.hpo_limited_list),
+            hpo_hidden_size=1536,
+            vocab_size=len(self.tokenizer.vocab)
+        )
 
     def train(self, base_step=0, is_train=True):
 
         # create model for pretraining
+
         self.encoder = models.Encoder(self.config)
-        # self.encoder = models.EncoderCNN(self.config)
-        self.encoder.to(self.device)
         self.generator = models.Generator(self.config)
-        self.generator.to(self.device)
+        # TODO: CNN
+        # self.encoder = models.EncoderCNN(self.cnnconfig)
+        # self.generator = models.GeneratorCNN(self.cnnconfig)
+
         self.prior_constraint_model = models.PriorConstraintModel(self.config)
+
+        self.encoder.to(self.device)
+        self.generator.to(self.device)
         self.prior_constraint_model.to(self.device)
 
         if self.n_gpu > 1:
@@ -413,16 +419,18 @@ class UnsupervisedAnnotationController():
             except:
                 pass
             try:
-                utils.load_model_rm_module(self.encoder, encoder_model_file)
-                utils.load_model_rm_module(self.generator, generator_model_file)
-                utils.load_model_rm_module(self.prior_constraint_model, prior_model_file)
+                if not success:
+                    utils.load_model_rm_module(self.encoder, encoder_model_file)
+                    utils.load_model_rm_module(self.generator, generator_model_file)
+                    utils.load_model_rm_module(self.prior_constraint_model, prior_model_file)
                 success = True
             except:
                 pass
             try:
-                utils.load_model_add_module(self.encoder, encoder_model_file)
-                utils.load_model_add_module(self.generator, generator_model_file)
-                utils.load_model_add_module(self.prior_constraint_model, prior_model_file)
+                if not success:
+                    utils.load_model_add_module(self.encoder, encoder_model_file)
+                    utils.load_model_add_module(self.generator, generator_model_file)
+                    utils.load_model_add_module(self.prior_constraint_model, prior_model_file)
                 success = True
             except:
                 pass
@@ -464,7 +472,6 @@ class UnsupervisedAnnotationController():
         # hpo_description_list = [corpus_hpo_data[hpo] for hpo in dataloader.hpo_limited_list]
         assert len(corpus_mimic_data) == config.total_num_mimic_record
 
-        # TODO: which set to use?
         hpo_corpus_dataset = UnsupervisedAnnotationHPODataset(
             dataloader.hpo_limited_list,
             hpo_children_info,
@@ -481,7 +488,8 @@ class UnsupervisedAnnotationController():
             corpus_hpo_data,
             self.tokenizer, seq_len=config.sequence_length // 2
         )
-        del hpo_children_info, corpus_hpo_data
+        # TODO: del to release memeory
+        # del hpo_children_info, corpus_hpo_data
 
         if is_train:
             # train_corpus_mimic = corpus_mimic_data[:int(len(corpus_mimic_data) * config.training_percentage)]
@@ -567,7 +575,7 @@ class UnsupervisedAnnotationController():
 
         for cur_epoch in range(total_num_epoch):
 
-            def _hpo_res(cof1, cof2, cof3, cof4, percentage=1.0):
+            def _hpo_res(cof1, cof2, cof3, cof4, percentage=1.0, single_step=False):
 
                 res_hpo_loss_agg = res_alpha_loss_agg = prior_loss_agg = vector_classify_loss_agg = 0
                 for step, batch in enumerate(hpo_corpus_dataloader):
@@ -576,50 +584,47 @@ class UnsupervisedAnnotationController():
                     input_ids, input_ids_hpos, input_mask, segment_ids, one_hpo_id, all_hpo_alpha = batch
 
                     #########
-                    # reconstruction: encoding + generating
-                    alpha_out, all_hpo_latent_outputs = self.encoder(input_ids, segment_ids, None)
-                    # full_reconstructed_sequence = self.generator(alpha_out, all_hpo_latent_outputs, None)
-                    full_reconstructed_sequence = self.generator(all_hpo_alpha, all_hpo_latent_outputs, None)
-
-                    # torch.set_printoptions(threshold=5000)
-                    # tmp = F.sigmoid(alpha_out)
-                    # print(tmp[:10])
-                    # print(all_hpo_alpha[:10])
-                    # print(torch.argmax(tmp, dim=1))
-                    # print(torch.argmax(all_hpo_alpha, dim=1))
-                    # exit()
-
-                    res_hpo_loss = loss_function.resconstruction(full_reconstructed_sequence, input_ids)
-                    res_alpha_loss = loss_function.alpha_cross_entropy(alpha_out, all_hpo_alpha)
-
-                    #########
                     # prior constrain
+
+                    alpha_out, all_hpo_latent_outputs = self.encoder(input_ids, segment_ids, None)
+                    # print(alpha_out.shape)
+                    # print(all_hpo_latent_outputs.shape)
 
                     ## extract one hpo
                     one_hpo_alpha_out = np.zeros(
                         shape=alpha_out.shape
                     ).astype(np.float32)
 
-                    one_hpo_latent_outputs = np.zeros(
-                        shape=[all_hpo_latent_outputs.size()[0], all_hpo_latent_outputs.size()[2]]
-                    ).astype(np.float32)
+                    # one_hpo_latent_outputs = np.zeros(
+                    #     shape=[all_hpo_latent_outputs.size()[0], all_hpo_latent_outputs.size()[2]]
+                    # ).astype(np.float32)
 
+                    one_hpo_latent_outputs = list()
                     for i in range(one_hpo_id.shape[0]):
                         one_hpo_alpha_out[i][one_hpo_id[i]] = float(1)
-                        one_hpo_latent_outputs[i] = all_hpo_latent_outputs[i][one_hpo_id[i]].detach().cpu().numpy()
+                        # one_hpo_latent_outputs[i] = all_hpo_latent_outputs[i][one_hpo_id[i]].detach().cpu().numpy()
+                        one_hpo_latent_outputs.append(all_hpo_latent_outputs[i][one_hpo_id[i]])
 
                     one_hpo_alpha_out = torch.tensor(one_hpo_alpha_out)
                     one_hpo_alpha_out = one_hpo_alpha_out.to(self.device)
 
-                    one_hpo_latent_outputs = torch.tensor(one_hpo_latent_outputs)
+                    # one_hpo_latent_outputs = torch.tensor(one_hpo_latent_outputs)
+                    one_hpo_latent_outputs = torch.stack(one_hpo_latent_outputs, dim=0)
                     one_hpo_latent_outputs = one_hpo_latent_outputs.to(self.device)
                     ##
 
-                    latent_vector_classify_out = self.prior_constraint_model(one_hpo_latent_outputs, None)
+                    # TODO add noise: one_hpo_latent_outputs
+                    noise = torch.randint_like(one_hpo_latent_outputs, low=900, high=1100) / 1000
+                    latent_vector_classify_out = self.prior_constraint_model(one_hpo_latent_outputs * noise, None)
                     vector_classify_loss = loss_function.multi_label_cross_entropy(latent_vector_classify_out, one_hpo_id)
 
-                    hpo_reconstructed_sequence = self.generator(one_hpo_alpha_out, all_hpo_latent_outputs, None)
+                    noise = torch.randint_like(all_hpo_latent_outputs, low=950, high=1050) / 1000
+                    hpo_reconstructed_sequence = self.generator(one_hpo_alpha_out, all_hpo_latent_outputs * noise, None)
                     hpo_constrain_loss = loss_function.resconstruction(hpo_reconstructed_sequence, input_ids_hpos)
+
+                    # print(latent_vector_classify_out.shape)
+                    # print(hpo_reconstructed_sequence.shape)
+                    # exit()
 
                     # print(one_hpo_id)
                     # print(one_hpo_alpha_out)
@@ -629,30 +634,68 @@ class UnsupervisedAnnotationController():
 
                     prior_loss = hpo_constrain_loss
 
-                    loss = cof1 * res_hpo_loss + cof2 * res_alpha_loss + cof3 * prior_loss + cof4 * vector_classify_loss
+                    loss1 = cof3 * prior_loss + cof4 * vector_classify_loss
+
+                    if self.n_gpu > 1:
+                        prior_loss = prior_loss.mean()
+                        vector_classify_loss = vector_classify_loss.mean()
+                        loss1 = loss1.mean()
+
+                    prior_loss_agg += prior_loss.item()
+                    vector_classify_loss_agg += vector_classify_loss.item()
+
+                    if is_train and not single_step:
+                        # loss1.backward(retain_graph=True)
+                        loss1.backward()
+                        optimizer.step()
+                        optimizer.zero_grad()
+
+                    #########
+                    # reconstruction: encoding + generating
+                    # TODO: keep or not
+                    if not single_step:
+                        alpha_out, all_hpo_latent_outputs = self.encoder(input_ids, segment_ids, None)
+
+                    full_reconstructed_sequence = self.generator(alpha_out, all_hpo_latent_outputs, None)
+                    # full_reconstructed_sequence = self.generator(all_hpo_alpha, all_hpo_latent_outputs, None)
+
+
+                    # TODO: printout, to remove
+                    # torch.set_printoptions(threshold=5000)
+                    # tmp = F.sigmoid(alpha_out)
+                    # print(tmp[:10])
+                    # print(all_hpo_alpha[:10])
+                    # print(torch.topk(tmp, 2, dim=1)[1][:10])
+                    # print(torch.topk(all_hpo_alpha, 2, dim=1)[1][:10])
+                    # exit()
+
+                    res_hpo_loss = loss_function.resconstruction(full_reconstructed_sequence, input_ids)
+                    res_alpha_loss = loss_function.alpha_cross_entropy(alpha_out, all_hpo_alpha)
+
+                    loss2 = cof1 * res_hpo_loss + cof2 * res_alpha_loss
 
                     if self.n_gpu > 1:
                         # res_loss = res_loss.mean() # mean() to average on multi-gpu.
                         res_hpo_loss = res_hpo_loss.mean()
                         res_alpha_loss = res_alpha_loss.mean()
-                        prior_loss = prior_loss.mean()
-                        vector_classify_loss = vector_classify_loss.mean()
-                        loss = loss.mean()
+                        loss2 = loss2.mean()
 
                     res_hpo_loss_agg += res_hpo_loss.item()
                     res_alpha_loss_agg += res_alpha_loss.item()
-                    prior_loss_agg += prior_loss.item()
-                    vector_classify_loss_agg += vector_classify_loss.item()
 
                     # training the reconstruction part
-                    if is_train:
-                        loss.backward()
+                    if is_train and not single_step:
+                        loss2.backward()
                         optimizer.step()
                         optimizer.zero_grad()
-                        # res_loss.backward()
-                        # prior_loss.backward()
-                        # optimizer_prime.step()
-                        # optimizer_prime.zero_grad()
+
+                    if single_step:
+                        if global_step % 100 == 0:
+                            logger.info("[HPO] E: %d, Step: %d, loss: %.4f / %.4f / %.4f / %.4f" % (
+                                cur_epoch, step, res_hpo_loss_agg / (step + 1), res_alpha_loss_agg / (step + 1),
+                                prior_loss_agg / (step + 1), vector_classify_loss_agg / (step + 1)
+                            ))
+                        return loss1 + loss2
 
                     if (step > 0 or percentage > 0.99) and step % 100 == 0:
                     # if step % 100 == 0:
@@ -675,10 +718,11 @@ class UnsupervisedAnnotationController():
                 for _ in range(1):
                     _hpo_res(0.01, 10, 0.01, 2, percentage=1.0)
 
+            # TODO: printout, to remove
             # _hpo_res(0.01, 10, 0.01, 2, percentage=1.0)
             # exit()
 
-            tr_loss = 0
+            tr_loss1 = tr_loss2 = 0
             tr_res_loss = 0
             tr_phe_loss = 0
             tr_vcl_loss = 0
@@ -686,8 +730,6 @@ class UnsupervisedAnnotationController():
 
             for step, batch in enumerate(tqdm(mimic_corpus_dataloader, desc="MIMIC Iter")):
 
-                ##########
-                # reconstruction: encoding + generating
                 batch = tuple(t.to(self.device) for t in batch)
                 input_ids, input_mask, segment_ids = batch
                 # alpha_out, all_hpo_latent_outputs = self.encoder(input_ids, segment_ids, input_mask)
@@ -695,7 +737,7 @@ class UnsupervisedAnnotationController():
                 alpha_out, all_hpo_latent_outputs = self.encoder(input_ids, segment_ids, None)
 
                 '''
-                # TODO: comment this
+                # TODO: printout, to remove
                 torch.set_printoptions(threshold=5000)
                 tmp = F.sigmoid(alpha_out)
                 print(tmp[:10])
@@ -711,12 +753,9 @@ class UnsupervisedAnnotationController():
                 for i in range(len(counter)):
                     print(i, dataloader.hpo_limited_list[i], counter[i],
                           len(hpo_children_info[dataloader.hpo_limited_list[i]]))
+                    print(corpus_hpo_data[dataloader.hpo_limited_list[i]])
                 exit()
                 '''
-
-                full_reconstructed_sequence = self.generator(alpha_out, all_hpo_latent_outputs, None)
-
-                res_loss = loss_function.resconstruction(full_reconstructed_sequence, input_ids)
 
                 ##########
                 # prior constraint
@@ -729,15 +768,17 @@ class UnsupervisedAnnotationController():
                     shape=alpha_out.shape
                 ).astype(np.float32)
 
-                one_hpo_latent_outputs = np.zeros(
-                    shape=[all_hpo_latent_outputs.size()[0], all_hpo_latent_outputs.size()[2]]
-                ).astype(np.float32)
+                # one_hpo_latent_outputs = np.zeros(
+                #     shape=[all_hpo_latent_outputs.size()[0], all_hpo_latent_outputs.size()[2]]
+                # ).astype(np.float32)
+                one_hpo_latent_outputs = list()
 
                 hpo_input_ids = list()
 
                 for i in range(which_hpo.shape[0]):
                     one_hpo_alpha_out[i][which_hpo[i]] = float(1)
-                    one_hpo_latent_outputs[i] = all_hpo_latent_outputs[i][which_hpo[i]].detach().cpu().numpy()
+                    # one_hpo_latent_outputs[i] = all_hpo_latent_outputs[i][which_hpo[i]].detach().cpu().numpy()
+                    one_hpo_latent_outputs.append(all_hpo_latent_outputs[i][which_hpo[i]])
                     hpo_input_ids.append(hpo_ids[which_hpo[i]])
 
                 which_hpo = torch.tensor(which_hpo)
@@ -746,7 +787,8 @@ class UnsupervisedAnnotationController():
                 one_hpo_alpha_out = one_hpo_alpha_out.to(self.device)
                 hpo_input_ids = torch.stack(hpo_input_ids, dim=0)
                 hpo_input_ids = hpo_input_ids.to(self.device)
-                one_hpo_latent_outputs = torch.tensor(one_hpo_latent_outputs)
+                # one_hpo_latent_outputs = torch.tensor(one_hpo_latent_outputs)
+                one_hpo_latent_outputs = torch.stack(one_hpo_latent_outputs, dim=0)
                 one_hpo_latent_outputs = one_hpo_latent_outputs.to(self.device)
                 ##
 
@@ -758,44 +800,79 @@ class UnsupervisedAnnotationController():
                 # print(one_hpo_latent_outputs.shape)
                 # print(hpo_input_ids.shape)
 
-                latent_vector_classify_out = self.prior_constraint_model(one_hpo_latent_outputs, None)
+                # add noise
+                noise = torch.randint_like(one_hpo_latent_outputs, low=990, high=1010) / 1000
+                latent_vector_classify_out = self.prior_constraint_model(one_hpo_latent_outputs * noise, None)
                 vector_classify_loss = loss_function.multi_label_cross_entropy(latent_vector_classify_out, which_hpo)
 
-                hpo_reconstructed_sequence = self.generator(one_hpo_alpha_out, all_hpo_latent_outputs, None)
+                noise = torch.randint_like(all_hpo_latent_outputs, low=990, high=1010) / 1000
+                hpo_reconstructed_sequence = self.generator(one_hpo_alpha_out, all_hpo_latent_outputs * noise, None)
                 pr_loss = loss_function.resconstruction(hpo_reconstructed_sequence, hpo_input_ids)
 
-                loss = res_loss + pr_loss + vector_classify_loss
+                # loss1 = pr_loss + vector_classify_loss
+                loss1 = vector_classify_loss
 
                 if self.n_gpu > 1:
-                    loss = loss.mean() # mean() to average on multi-gpu.
-                    res_loss = res_loss.mean()
+                    loss1 = loss1.mean() # mean() to average on multi-gpu.
                     pr_loss = pr_loss.mean()
                     vector_classify_loss = vector_classify_loss.mean()
 
-                tr_loss += loss.item()
-                tr_res_loss += res_loss.item()
+                tr_loss1 += loss1.item()
                 tr_phe_loss += pr_loss.item()
                 tr_vcl_loss += vector_classify_loss.item()
+
+                if is_train and global_step + base_step < 0:
+                    # loss1.backward(retain_graph=True)
+                    loss1.backward()
+                    optimizer.step()
+                    optimizer.zero_grad()
+
+                ##########
+                # reconstruction: encoding + generating
+                # TODO: keep or not
+                if global_step + base_step < 0:
+                    alpha_out, all_hpo_latent_outputs = self.encoder(input_ids, segment_ids, None)
+
+                full_reconstructed_sequence = self.generator(alpha_out, all_hpo_latent_outputs, None)
+
+                res_loss = loss_function.resconstruction(full_reconstructed_sequence, input_ids)
+
+                loss2 = res_loss
+
+                if self.n_gpu > 1:
+                    loss2 = loss2.mean() # mean() to average on multi-gpu.
+                    res_loss = res_loss.mean()
+
+                tr_loss2 += loss2.item()
+                tr_res_loss += res_loss.item()
+
                 nb_tr_examples += input_ids.size(0)
                 nb_tr_steps += 1
+
+                if is_train and global_step + base_step < 0:
+                    loss2.backward()
+                    optimizer.step()
+                    optimizer.zero_grad()
+
 
                 if global_step % config.print_step_unsupervised == 0:
                     logger.info("[MIMIC] E: %d, Step: %d, Total Step: %d, loss: %.4f / %.4f / %.4f" % (
                         cur_epoch, global_step, global_step + base_step,
                         tr_res_loss / nb_tr_steps, tr_phe_loss / nb_tr_steps, tr_vcl_loss / nb_tr_steps))
 
-                if is_train:
-                    loss.backward()
+                if is_train and global_step + base_step >= 0:
+                    # loss_hpo = _hpo_res(1, 10, 0.0, 0.1, single_step=True)
+                    loss_hpo = _hpo_res(10, 2, 0.0, 0.1, single_step=True)
+                    loss_new = loss1 + 10 * loss2 + loss_hpo
+                    loss_new.backward()
                     optimizer.step()
                     optimizer.zero_grad()
-                    # res_loss.backward()
-                    # pr_loss.backward()
-                    # optimizer_prime.step()
-                    # optimizer_prime.zero_grad()
 
-                if global_step > 0 and global_step % 10 == 0:
-                    _hpo_res(0.1, 1, 0.1, 0.1,
-                             percentage=0.01)
+                else:
+                    if global_step > 0 and global_step % 10 == 0:
+                        # _hpo_res(0.5, 5, 0.5, 0.1,
+                        _hpo_res(1, 5, 0.0, 0.1,
+                                 percentage=0.01)
 
                 global_step += 1
 
@@ -835,12 +912,29 @@ class UnsupervisedAnnotationController():
         ## if loading error: check https://discuss.pytorch.org/t/solved-keyerror-unexpected-key-module-encoder-embedding-weight-in-state-dict/1686
         assert base_step > 0
         logger.info("** ** * Restoring model from step %d ** ** * " % base_step)
-        model_file = os.path.join(config.outputs_model_dir, "encoder_epoch%d.bin" % (base_step))
-        state_dict = torch.load(model_file)
-        self.encoder.load_state_dict(state_dict, strict=True)
-        # model_file = os.path.join(config.outputs_model_dir, "generator_epoch%d.bin" % (base_step))
-        # state_dict = torch.load(model_file)
-        # self.generator.load_state_dict(state_dict, strict=True)
+        success = False
+        encoder_model_file = os.path.join(config.outputs_model_dir, "encoder_epoch%d.bin" % (base_step))
+        try:
+            utils.load_model(self.encoder, encoder_model_file)
+            success = True
+        except:
+            pass
+        try:
+            if not success:
+                utils.load_model_rm_module(self.encoder, encoder_model_file)
+            success = True
+        except:
+            pass
+        try:
+            if not success:
+                utils.load_model_add_module(self.encoder, encoder_model_file)
+            success = True
+        except:
+            pass
+        if not success:
+            logger.error("FAIL TO LOAD MODEL ...")
+        else:
+            logger.info("MODELS RESTORED ...")
 
         ## create dataset
         # hpo_ontology = dataloader.load_hpo_ontology()
@@ -875,6 +969,7 @@ class UnsupervisedAnnotationController():
             mimic_corpus_dataloader = DataLoader(mimic_corpus_dataset, batch_size=config.test_batch_size)
 
         elif corpus_to_analysis == 'test':
+            # test_corpus_mimic = corpus_mimic_data
             # test_corpus_mimic = corpus_mimic_data[-int(len(corpus_mimic_data) * config.testing_percentage):]
             test_corpus_mimic = [corpus_mimic_data[index] for index in config.mimic_test_indices]
             test_mimic_sentence_list = [
@@ -893,7 +988,7 @@ class UnsupervisedAnnotationController():
             len(mimic_corpus_dataset) / config.test_batch_size
         )
 
-        loss_function = loss_func.Loss()
+        # loss_function = loss_func.Loss()
 
         ## start training
         logger.info("***** Running %s *****" % ('inference'))
@@ -903,32 +998,67 @@ class UnsupervisedAnnotationController():
 
         self.encoder.eval()
 
+        '''
+        #############
         # running on HPO descriptions firstly
-        '''
-        for step, batch in enumerate(hpo_corpus_dataloader):
+        hpo_children_info = dataloader.get_hpo_children_info()
+        hpo_corpus_dataset = UnsupervisedAnnotationHPODataset(
+            dataloader.hpo_limited_list,
+            hpo_children_info,
+            corpus_hpo_data,
+            self.tokenizer, seq_len=config.sequence_length // 2,
+            duplication=False
+        )
+        hpo_corpus_dataloader = DataLoader(
+            hpo_corpus_dataset,
+            sampler=RandomSampler(hpo_corpus_dataset),
+            batch_size=config.test_batch_size
+        )
+
+        hpo_alpha_results = []
+        hpo_alpha_gt = []
+        for step, batch in enumerate(tqdm(hpo_corpus_dataloader)):
             batch = tuple(t.to(self.device) for t in batch)
-            input_ids, input_mask, segment_ids, alpha_ids = batch
+            input_ids, input_ids_hpos, input_mask, segment_ids, one_hpo_id, all_hpo_alpha = batch
 
-            alpha_out, all_hpo_latent_outputs = self.encoder(input_ids, segment_ids, input_mask)
-            # alpha_out, all_hpo_latent_outputs = self.encoder(input_ids)
-            reconstructed_sequence = self.generator(alpha_out, all_hpo_latent_outputs, input_mask)
-            # alpha_out, all_hpo_latent_outputs = self.encoder(input_ids, segment_ids, None)
-            # reconstructed_sequence = self.generator(alpha_out, all_hpo_latent_outputs, None)
+            alpha_out, all_hpo_latent_outputs = self.encoder(input_ids, segment_ids, None)
 
-            res_loss = loss_function.resconstruction(reconstructed_sequence, input_ids)
-            alpha_loss = loss_function.alpha_cross_entropy(alpha_out, alpha_ids)
+            hpo_alpha_results.append(alpha_out.detach().cpu())
+            hpo_alpha_gt.append(all_hpo_alpha.detach().cpu())
 
-            if self.n_gpu > 1:
-                alpha_loss = alpha_loss.mean()
-                res_loss = res_loss.mean()
+            # torch.set_printoptions(threshold=5000000)
+            # print(torch.argmax(F.sigmoid(alpha_out), dim=1))
+            # print(torch.argmax(all_hpo_alpha, dim=1))
+            # exit()
 
-            logger.info("[HPO] BaseStep: %d, loss: %.4f / %.4f" % (base_step, res_loss, alpha_loss))
+        hpo_alpha_results = torch.cat(hpo_alpha_results, dim=0)
+        hpo_alpha_results = hpo_alpha_results.numpy()
+        hpo_alpha_gt = torch.cat(hpo_alpha_gt, dim=0)
+        hpo_alpha_gt = hpo_alpha_gt.numpy()
+
+        hpo_idx_list = [
+            hpo_corpus_dataset.samples_with_duplication[i]["self_hpo_idx"]
+            for i in range(len(hpo_corpus_dataset))
+        ]
+
+        print("HPO Num of samples: ", len(hpo_corpus_dataset))
+        print("HPO Alpha size: ", hpo_alpha_results.shape)
+        with open(config.outputs_results_dir + "hpo_idx_list.pickle", 'wb') as f:
+            pickle.dump(hpo_idx_list, f)
+        with open(config.outputs_results_dir + "hpo_alpha.npy", 'wb') as f:
+            np.save(f, hpo_alpha_results)
+        with open(config.outputs_results_dir + "hpo_alpha_gt.npy", 'wb') as f:
+            np.save(f, hpo_alpha_gt)
+        print("HPO Alpha saved")
+
+        exit()
+        ###############
         '''
 
-        tr_loss = 0
-        tr_res_loss = 0
-        tr_phe_loss = 0
-        nb_tr_examples, nb_tr_steps = 0, 0
+        # tr_loss = 0
+        # tr_res_loss = 0
+        # tr_phe_loss = 0
+        # nb_tr_examples, nb_tr_steps = 0, 0
 
         mimic_alpha_results = []
         for step, batch in enumerate(tqdm(mimic_corpus_dataloader, desc="MIMIC Iter")):
@@ -1031,9 +1161,32 @@ if __name__ == '__main__':
     # unsuperised_controller.inference(base_step=10000, corpus_to_analysis='test')
     # unsuperised_controller.train(base_step=140000, is_train=True)
     # unsuperised_controller.train(base_step=1, is_train=True)
-    # unsuperised_controller.train(base_step=1, is_train=True)
-    unsuperised_controller.inference(base_step=55000, corpus_to_analysis='test')
-    unsuperised_controller.inference(base_step=55000, corpus_to_analysis='train')
+
+    # unsuperised_controller.inference(base_step=25000, corpus_to_analysis='test')
+    # unsuperised_controller.inference(base_step=25000, corpus_to_analysis='train')
+
+    # coef2 = 1
+    # unsuperised_controller.train(base_step=0, is_train=True)
+    # unsuperised_controller.inference(base_step=25000, corpus_to_analysis='test')
+    # unsuperised_controller.inference(base_step=25000, corpus_to_analysis='train')
+
+    # coef1 = 0.5, coef2 = 5, coef3 = 0.5
+    # unsuperised_controller.train(base_step=40000, is_train=True)
+    # unsuperised_controller.inference(base_step=55000, corpus_to_analysis='test')
+    # unsuperised_controller.inference(base_step=55000, corpus_to_analysis='train')
+
+    # unsuperised_controller.train(base_step=55000, is_train=True)
+    # unsuperised_controller.inference(base_step=65000, corpus_to_analysis='test')
+    # unsuperised_controller.inference(base_step=65000, corpus_to_analysis='train')
+
+    # unsuperised_controller.train(base_step=155000, is_train=True)
+    unsuperised_controller.inference(base_step=155000, corpus_to_analysis='test')
+    # unsuperised_controller.inference(base_step=155000, corpus_to_analysis='train')
+
+    # unsuperised_controller.train(base_step=170000, is_train=True)
+
+    # TODO: CNN
+    # unsuperised_controller.train(base_step=0, is_train=True)
 
     # TODO: mix hpo description with MIMIC
     # TODO: change transformer to CNN

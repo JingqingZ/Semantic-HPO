@@ -258,17 +258,19 @@ class EncoderCNN(nn.Module):
         self.word_embeddings = nn.Embedding(config.vocab_size, config.embed_hidden_size)
         self.position_embeddings = nn.Embedding(config.max_position_embeddings, config.embed_hidden_size)
         self.conv1 = nn.Conv1d(config.embed_hidden_size, 512, 16, stride=1)
+        self.max1 = nn.MaxPool1d(2, stride=1)
         self.conv2 = nn.Conv1d(512, 1024, 8, stride=1)
+        self.max2 = nn.MaxPool1d(2, stride=1)
         self.conv3 = nn.Conv1d(1024, 2048, 4, stride=2)
 
-        self.hpo_dense = nn.Linear(2048 * 4, config.num_hpo_node)
+        self.hpo_dense = nn.Linear(6144, config.num_hpo_node)
         # self.hpo_activation = nn.ReLU()
         # self.hpo_softmax = nn.Softmax(dim=-1)
 
-        self.latent_dense_layers = nn.ModuleList([nn.Linear(2048 * 4, config.hpo_hidden_size) for _ in range(config.num_hpo_node)])
+        self.latent_dense_layers = nn.ModuleList([nn.Linear(6144, config.hpo_hidden_size) for _ in range(config.num_hpo_node)])
         # TODO: regularizers such as batchnorm dropout
 
-    def forward(self, input_ids):
+    def forward(self, input_ids, _, __):
         # seq_length = input_ids.size(1)
         # position_ids = torch.arange(seq_length, dtype=torch.long, device=input_ids.device)
         # position_ids = position_ids.unsqueeze(0).expand_as(input_ids)
@@ -278,11 +280,13 @@ class EncoderCNN(nn.Module):
         embeddings = self.word_embeddings(input_ids)
 
         conv_out = self.conv1(embeddings.permute(0, 2, 1))
+        conv_out = self.max1(F.relu(conv_out))
         conv_out = self.conv2(conv_out)
+        conv_out = self.max2(F.relu(conv_out))
         conv_out = self.conv3(conv_out)
         conv_out = conv_out.view(-1, conv_out.shape[1] * conv_out.shape[2])
 
-        alpha_out = self.hpo_dense(conv_out)
+        alpha_out = self.hpo_dense(F.relu(conv_out))
         # alpha_out = self.hpo_activation(alpha_out)
         # alpha_out = self.hpo_softmax(alpha_out)
 
@@ -294,5 +298,42 @@ class EncoderCNN(nn.Module):
         all_hpo_latent_outputs = torch.stack(all_hpo_latent_outputs, dim=1)
 
         return alpha_out, all_hpo_latent_outputs
+
+class GeneratorCNN(nn.Module):
+
+    def __init__(self, config):
+        super(GeneratorCNN, self).__init__()
+        assert isinstance(config, CNNConfig)
+        self.config = config
+
+        self.conv1 = nn.ConvTranspose1d(config.hpo_hidden_size, 1024, 8, stride=2)
+        self.max1 = nn.MaxPool1d(2, stride=1)
+        self.conv2 = nn.ConvTranspose1d(1024, 2048, 4, stride=2)
+        self.max2 = nn.MaxPool1d(2, stride=1)
+        self.conv3 = nn.ConvTranspose1d(2048, 4096, 4, stride=2)
+        # self.max3 = nn.MaxPool1d(2, stride=1)
+
+        self.dense = nn.Linear(4096, self.config.vocab_size)
+
+    def forward(self, alpha_inputs, all_hpo_latent_inputs, attention_mask=None):
+        assert alpha_inputs.shape[1] == all_hpo_latent_inputs.shape[1]
+        latent_prime = torch.matmul(
+            all_hpo_latent_inputs.permute(0, 2, 1),
+            F.sigmoid(alpha_inputs).unsqueeze(dim=-1)
+            # F.softmax(alpha_inputs).unsqueeze(dim=-1)
+        )
+
+        z = self.conv1(latent_prime)
+        z = F.relu(z)
+        z = self.max1(z)
+        z = self.conv2(z)
+        z = F.relu(z)
+        z = self.max2(z)
+        z = self.conv3(z)
+        z = F.relu(z)
+        z = self.dense(z.permute(0, 2, 1))
+        z = F.relu(z)
+
+        return z
 
 

@@ -11,6 +11,7 @@ silver_standard_results_file = config.outputs_results_dir + "silver_standard.csv
 keyword_search_results_file = config.outputs_results_dir + "keyword_search.csv"
 ehr_phenolyzer_ncbo_results_file = config.outputs_results_dir + "ehr_pheno_ncbo.csv"
 obo_annotator_results_file = config.outputs_results_dir + "obo_annotator.csv"
+metamap_annotator_results_file = config.outputs_results_dir + "metamap_annotator.csv"
 
 def silver_standard():
 
@@ -33,49 +34,59 @@ def silver_standard():
         print("Avg HPO per OMIM: %.f" % np.mean([len(omim2hpo[omim]) for omim in omim2hpo]))
         print("Med HPO per OMIM: %.f" % np.median([len(omim2hpo[omim]) for omim in omim2hpo]))
         print("Min HPO per OMIM: %.f" % np.min([len(omim2hpo[omim]) for omim in omim2hpo]))
-        # Max OMIM per ICD: 63                                                                                                  │·····················································································
-        # Q95 OMIM per ICD: 13                                                                                                  │·····················································································
-        # Q90 OMIM per ICD: 9                                                                                                   │·····················································································
-        # Avg OMIM per ICD: 4                                                                                                   │·····················································································
-        # Med OMIM per ICD: 2                                                                                                   │·····················································································
-        # Min OMIM per ICD: 1                                                                                                   │·····················································································
-        # ---                                                                                                                   │·····················································································
-        # Max HPO per OMIM: 127                                                                                                 │·····················································································
-        # Q95 HPO per OMIM: 37                                                                                                  │·····················································································
-        # Q90 HPO per OMIM: 28                                                                                                  │·····················································································
-        # Avg HPO per OMIM: 13                                                                                                  │·····················································································
-        # Med HPO per OMIM: 9                                                                                                   │·····················································································
+        # Max OMIM per ICD: 63 
+        # Q95 OMIM per ICD: 13
+        # Q90 OMIM per ICD: 9 
+        # Avg OMIM per ICD: 4 
+        # Med OMIM per ICD: 2 
+        # Min OMIM per ICD: 1 
+        # ---                 
+        # Max HPO per OMIM: 127                                                                              
+        # Q95 HPO per OMIM: 37
+        # Q90 HPO per OMIM: 28
+        # Avg HPO per OMIM: 13
+        # Med HPO per OMIM: 9 
         # Min HPO per OMIM: 1
 
-        # icd2hpo = dataloader.get_icd_hpo_silver_mapping()
-        icd2hpo = dataloader.get_icd_hpo_in_limited_hpo_set(dataloader.hpo_phenotypic_abnormality_id)
-        print("---")
-        print("Max HPO per ICD: %.f" % np.max([len(icd2hpo[icd]) for icd in icd2hpo]))
-        print("Q95 HPO per ICD: %.f" % np.quantile([len(icd2hpo[icd]) for icd in icd2hpo], 0.95))
-        print("Q90 HPO per ICD: %.f" % np.quantile([len(icd2hpo[icd]) for icd in icd2hpo], 0.90))
-        print("Avg HPO per ICD: %.f" % np.mean([len(icd2hpo[icd]) for icd in icd2hpo]))
-        print("Med HPO per ICD: %.f" % np.median([len(icd2hpo[icd]) for icd in icd2hpo]))
-        print("Min HPO per ICD: %.f" % np.min([len(icd2hpo[icd]) for icd in icd2hpo]))
-        # Max HPO per ICD: 20                                                                                                   │·····················································································
-        # Q95 HPO per ICD: 16                                                                                                   │·····················································································
-        # Q90 HPO per ICD: 14                                                                                                   │·····················································································
-        # Avg HPO per ICD: 8                                                                                                    │·····················································································
-        # Med HPO per ICD: 8                                                                                                    │·····················································································
+        icd2fullhpo = dataloader.get_icd_hpo_silver_mapping()
+        icd2limitedhpo = dataloader.get_icd_hpo_in_limited_hpo_set(dataloader.hpo_phenotypic_abnormality_id)
+        # print("---")
+        # print("Max HPO per ICD: %.f" % np.max([len(icd2hpo[icd]) for icd in icd2hpo]))
+        # print("Q95 HPO per ICD: %.f" % np.quantile([len(icd2hpo[icd]) for icd in icd2hpo], 0.95))
+        # print("Q90 HPO per ICD: %.f" % np.quantile([len(icd2hpo[icd]) for icd in icd2hpo], 0.90))
+        # print("Avg HPO per ICD: %.f" % np.mean([len(icd2hpo[icd]) for icd in icd2hpo]))
+        # print("Med HPO per ICD: %.f" % np.median([len(icd2hpo[icd]) for icd in icd2hpo]))
+        # print("Min HPO per ICD: %.f" % np.min([len(icd2hpo[icd]) for icd in icd2hpo]))
+        # Max HPO per ICD: 20 
+        # Q95 HPO per ICD: 16 
+        # Q90 HPO per ICD: 14 
+        # Avg HPO per ICD: 8  
+        # Med HPO per ICD: 8  
         # Min HPO per ICD: 0
 
-        def icd2hpo_mapping(icdstr):
+        def icd2limitedhpo_mapping(icdstr):
             icd_list = icdstr.split("/")
             hposet = set()
             for icd in icd_list:
-                if icd in icd2hpo:
-                    hposet.update(icd2hpo[icd])
+                if icd in icd2limitedhpo:
+                    hposet.update(icd2limitedhpo[icd])
+            hpostr = "/".join(hposet)
+            return hpostr
+
+        def icd2fullhpo_mapping(icdstr):
+            icd_list = icdstr.split("/")
+            hposet = set()
+            for icd in icd_list:
+                if icd in icd2fullhpo:
+                    hposet.update(icd2fullhpo[icd])
             hpostr = "/".join(hposet)
             return hpostr
 
         print("Computing silver standard ...")
-        mimic_data["HPO_CODE_LIST"] = mimic_data['ICD9_CODE_LIST'].apply(icd2hpo_mapping)
+        mimic_data["HPO_CODE_LIST"] = mimic_data['ICD9_CODE_LIST'].apply(icd2limitedhpo_mapping)
+        mimic_data["FULL_HPO_CODE_LIST"] = mimic_data['ICD9_CODE_LIST'].apply(icd2fullhpo_mapping)
 
-        mimic_data = mimic_data[["ICD9_CODE_LIST", "HPO_CODE_LIST", "CLEAN_TEXT"]]
+        mimic_data = mimic_data[["ICD9_CODE_LIST", "HPO_CODE_LIST", "FULL_HPO_CODE_LIST", "CLEAN_TEXT"]]
 
         mimic_data.to_csv(silver_standard_results_file)
 
@@ -292,9 +303,14 @@ def keyword_search_with_negation():
 
     return keyword_search_df
 
-def random_pick():
-    # TODO: randomly pick a random number of HPO terms
-    pass
+def random_pick(avg_hpo_num_per_mimic):
+    import random
+    random_results = list()
+    for i in range(config.total_num_mimic_record):
+        hpolist = random.sample(dataloader.hpo_limited_list, avg_hpo_num_per_mimic)
+        hpostr = "/".join(hpolist)
+        random_results.append(hpostr)
+    return random_results
 
 def topic_model():
     # TODO: use topic model and design a rule to connect topics with HPO
@@ -344,7 +360,8 @@ def ehr_phenolyzer_ncbo_annotator():
             return hpostr
 
         print("Computing baseline: EHR Phenolyzer NCBO ...")
-        group_num = 100
+        # group_num = 100
+        group_num = 10
         new_mimic_data = None
         for i in trange(full_mimic_data.shape[0] // group_num + 1):
 
@@ -445,7 +462,7 @@ def obo_annotator():
 
     return mimic_data
 
-def ehr_phenolyzer_metamap():
+def _ehr_phenolyzer_metamap():
 
     # run this if necessary
     # dataloader.convert_mimic_corpus_for_metamap()
@@ -506,6 +523,9 @@ def ehr_phenolyzer_metamap():
             print("TID %s: started [%d, %d)" % (self.tid, self.start_id, self.end_id))
             start_time = time.time()
             for i in range(self.start_id, self.end_id):
+                if os.path.exists(outdir + "%d" % i + ".hpo.txt"):
+                    total_num_doc -= 1
+                    continue
                 input_filename = dataloader.mimic4metamap_folder + "%d.txt" % i
                 run_metamap(metamap_bin_folder, input_filename, "%d" % i, uid2name_dict, name2id_dict, outdir)
                 counter += 1
@@ -519,7 +539,7 @@ def ehr_phenolyzer_metamap():
                 )
             print("TID %s: finished [%d, %d)" % (self.tid, self.start_id, self.end_id))
 
-    num_thread = 7
+    num_thread = 1
     each_thread = config.total_num_mimic_record // num_thread
     list_of_thread = [
         myThread(i, i * each_thread, (i + 1) * each_thread)
@@ -536,8 +556,77 @@ def ehr_phenolyzer_metamap():
     #     input_filename = dataloader.mimic4metamap_folder + "%d.txt" % i
     #     run_metamap(metamap_bin_folder, input_filename, "%d" % i, uid2name_dict, name2id_dict, outdir)
 
+def aggregate_metamap_results():
+
+    if not os.path.exists(metamap_annotator_results_file):
+        metamap_raw_results_folder = [
+            "../data/MetaMap/metamap_results_0/",
+            "../data/MetaMap/metamap_results_1/",
+            "../data/MetaMap/metamap_results_2/"
+        ]
+
+        metamap_hpo_results = []
+        for i in range(config.total_num_mimic_record):
+            found_flag = False
+            for folder in metamap_raw_results_folder:
+                filename = folder + "%d.hpo.txt" % i
+                if not os.path.exists(filename):
+                    continue
+                found_flag = True
+
+                with open(filename, 'r') as f:
+                    content = f.read().split("\n")
+                    hpolist = [s.split(";")[0] for s in content if len(s) > 0]
+                    hpostr = "/".join(hpolist)
+                    metamap_hpo_results.append(hpostr)
+                break
+
+            if not found_flag:
+                metamap_hpo_results.append("")
+                print("MIMIC ID %d not found" % i)
+
+        assert len(metamap_hpo_results) == config.total_num_mimic_record
+
+        children_info = dataloader.get_hpo_children_info()
+        children_to_predecessor = dict()
+        for hpo_id in dataloader.hpo_limited_list:
+            children = children_info[hpo_id]
+            for cnode in {hpo_id} | children:
+                if cnode not in children_to_predecessor:
+                    children_to_predecessor[cnode] = set()
+                children_to_predecessor[cnode].add(hpo_id)
+
+        def _convert_to_predecessor(hpo_list):
+            if isinstance(hpo_list, float):
+                return ""
+            new_hpo_set = set()
+            for hpo_id in hpo_list.split("/"):
+                if hpo_id not in children_to_predecessor:
+                    continue
+                new_hpo_set.update(children_to_predecessor[hpo_id])
+            return "/".join(new_hpo_set)
+
+        print("Finalizing results of MetaMap to CSV format")
+        mimic_data = dataloader.load_mimic()
+        mimic_data['HPO_CODE_LIST_METAMAP_ANNO'] = pd.Series(metamap_hpo_results)
+        mimic_data['HPO_CODE_LIST_METAMAP_ANNO_PREDECESSORS_ONLY'] = mimic_data['HPO_CODE_LIST_METAMAP_ANNO'].apply(_convert_to_predecessor)
+
+        mimic_data = mimic_data[["ICD9_CODE_LIST",
+                                 "HPO_CODE_LIST_METAMAP_ANNO",
+                                 "HPO_CODE_LIST_METAMAP_ANNO_PREDECESSORS_ONLY",
+                                 "CLEAN_TEXT"]]
+        mimic_data.to_csv(metamap_annotator_results_file)
+    else:
+        mimic_data = pd.read_csv(metamap_annotator_results_file)
+
+    return mimic_data
+
+
+
 
 if __name__ == '__main__':
+
+    # silver_standard()
 
     '''
     mimic_data = silver_standard()
@@ -555,10 +644,10 @@ if __name__ == '__main__':
     # Avg HPO for those have 15
     # Median HPO for those have 12
     # LIMITED HPO (direct children of HP:0000118)
-    # Num of EHR has HPO 27980/52722                                                                                        │·····················································································
-    # Avg HPO for all 3                                                                                                     │·····················································································
-    # Median HPO for all 4                                                                                                  │·····················································································
-    # Avg HPO for those have 6                                                                                              │·····················································································
+    # Num of EHR has HPO 27980/52722                                                                     
+    # Avg HPO for all 3   
+    # Median HPO for all 4
+    # Avg HPO for those have 6                                                                           
     # Median HPO for those have 5
 
     '''
@@ -617,9 +706,12 @@ if __name__ == '__main__':
     # Avg HPO for those have 11
     # Median HPO for those have 11
 
-    # mimic_data = ehr_phenolyzer_ncbo_annotator()
+    mimic_data = ehr_phenolyzer_ncbo_annotator()
     # mimic_data = obo_annotator()
-    ehr_phenolyzer_metamap()
+    # _ehr_phenolyzer_metamap()
+
+    # aggregate_metamap_results()
+    # random_pick()
 
     pass
 

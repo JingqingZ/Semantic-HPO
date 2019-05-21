@@ -1,7 +1,7 @@
 
 train_epoch = 10
 train_epoch_unsupervised = 10
-train_batch_size = 64
+train_batch_size = 32
 test_batch_size = 64
 
 save_step_4_pretrain = 5000
@@ -36,7 +36,11 @@ mimic_test_indices = mimic_indices[-int(total_num_mimic_record * testing_percent
 
 
 outputs_dir = "../outputs/"
-outputs_model_dir = outputs_dir + "models/"
+# TODO: change
+# outputs_model_dir = outputs_dir + "models/"
+outputs_model_dir = outputs_dir + "models_with_noise/"
+# TODO: CNN
+# outputs_model_dir = outputs_dir + "models_cnn_with_noise/"
 outputs_results_dir = outputs_dir + "results/"
 outputs_figures_dir = outputs_dir + "figures/"
 outputs_interm_dir = outputs_dir + "interm/"
@@ -54,3 +58,5 @@ if not os.path.exists(outputs_figures_dir):
     os.makedirs(outputs_figures_dir)
 if not os.path.exists(outputs_interm_dir):
     os.makedirs(outputs_interm_dir)
+
+_global_verbose_print = True
