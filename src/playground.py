@@ -744,7 +744,7 @@ if __name__ == '__main__':
     # analyze_appearance_of_hpo(8)
 
     # analyze_alpha()
-    analyze_alpha_2()
+    # analyze_alpha_2()
 
     '''
     silver = evaluation.get_icd2hpo_3digit_results()
@@ -765,5 +765,16 @@ if __name__ == '__main__':
     print(counter)
     '''
 
+    silver = evaluation.get_icd2hpo_3digit_results()
+    candidate = [42292, 19235, 22338]
+    import pandas as pd
+    df = pd.read_csv(config.outputs_results_dir + "unsupervised_method_var_threshold_0.3975.csv")
+    # hpostr = df["HPO_CODE_LIST_UNSUPERVISED_METHOD_PREDECESSORS_ONLY"][]
+    df = df.iloc[candidate]
+    df["HPO_ANNOTATION"] = df["HPO_CODE_LIST_UNSUPERVISED_METHOD_PREDECESSORS_ONLY"]
+    df["EHR_TEXT"] = df["TEXT"]
+    df = df[["HPO_ANNOTATION", "ICD9_CODE_LIST", "EHR_TEXT"]]
+    df.to_csv("samples.csv")
+    print(df)
 
     pass

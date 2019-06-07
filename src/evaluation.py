@@ -972,8 +972,8 @@ if __name__ == '__main__':
     # evaluation_between_all_methods(jaccard)
     # print("====================")
     # evaluation_between_all_methods(overlap_coefficient)
-    # _global_print_best_worst_case = True
-    # evaluation_unsuper_case_study()
+    _global_print_best_worst_case = True
+    evaluation_unsuper_case_study()
     # exit()
 
     # icd_code = get_icd_code_3digit()
@@ -984,7 +984,7 @@ if __name__ == '__main__':
     # mimic_data_text = dataloader.load_mimic()["TEXT"].tolist()
     # print(mimic_data_text[42292])
 
-    evaluate_for_each_icd()
+    # evaluate_for_each_icd()
 
     pass
 
