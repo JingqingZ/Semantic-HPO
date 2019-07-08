@@ -2,6 +2,7 @@
 import pickle
 from tqdm import tqdm
 import numpy as np
+import pandas as pd
 
 import utils
 import config
@@ -672,6 +673,56 @@ def analyze_alpha_2():
         p = "%2d %.3f %.3f %.3f %.3f" % (i, threshold[i], position, percent, percent / position)
         print(p)
 
+def mapping_hpo_annotation_to_icd():
+
+    icd2limitedhpo_mapping = dataloader.get_3digit_icd_hpo_in_limited_hpo_set()
+
+    hpo2icd_policy1 = dict()
+    for icd in icd2limitedhpo_mapping:
+        for hpo in icd2limitedhpo_mapping[icd]:
+            if hpo not in hpo2icd_policy1:
+                hpo2icd_policy1[hpo] = set()
+            hpo2icd_policy1[hpo].add(icd)
+
+    df = pd.read_csv(config.outputs_results_dir + "unsupervised_method_var_threshold_0.3975.csv")
+
+    icd2ehr = dict()
+
+    def update_icd2ehr(icd9_set, column):
+        for icd in icd9_set:
+            if icd not in icd2ehr:
+                icd2ehr[icd] = {
+                    "original": list(),
+                    "policy1": list(),
+                    "policy2": list()
+                }
+            icd2ehr[icd][column].append(index)
+
+    for index, row in df.iterrows():
+        icd9_codes = row["ICD9_CODE_LIST"]
+        hpo_codes = row["HPO_CODE_LIST_UNSUPERVISED_METHOD_PREDECESSORS_ONLY"]
+
+        icd9_codes = set() if type(icd9_codes) != str else set([icd[:3] for icd in icd9_codes.split("/")])
+        hpo_codes = set() if type(hpo_codes) != str else set([hpo for hpo in hpo_codes.split("/")])
+
+        update_icd2ehr(icd9_codes, "original")
+
+        icd9_codes_with_policy1 = set([icd for hpo in hpo_codes for icd in hpo2icd_policy1[hpo]])
+        update_icd2ehr(icd9_codes_with_policy1, "policy1")
+
+        icd9_codes_with_policy2 = set([icd for icd in icd2limitedhpo_mapping if icd2limitedhpo_mapping[icd] <= hpo_codes])
+        update_icd2ehr(icd9_codes_with_policy2, "policy2")
+
+    with open("HPO2ICD_POLICY12.csv", 'w') as outfile:
+        outfile.write("%s\t%s\t%s\t%s\n" % ("ICD", "Original", "Policy1", "Policy2"))
+        for icd in icd2limitedhpo_mapping:
+            outfile.write("%s\t%d\t%d\t%d\n" % (icd, len(icd2ehr[icd]["original"]), len(icd2ehr[icd]["policy1"]), len(icd2ehr[icd]["policy2"])))
+
+    print(icd2limitedhpo_mapping['277'])
+    print(icd2limitedhpo_mapping['153'])
+    print(icd2limitedhpo_mapping['287'])
+
+
 if __name__ == '__main__':
     # icd_distribution_in_mimic()
     # num_mimic_negation()
@@ -765,6 +816,7 @@ if __name__ == '__main__':
     print(counter)
     '''
 
+    '''
     silver = evaluation.get_icd2hpo_3digit_results()
     candidate = [42292, 19235, 22338]
     import pandas as pd
@@ -776,5 +828,8 @@ if __name__ == '__main__':
     df = df[["HPO_ANNOTATION", "ICD9_CODE_LIST", "EHR_TEXT"]]
     df.to_csv("samples.csv")
     print(df)
+    '''
+
+    mapping_hpo_annotation_to_icd()
 
     pass
