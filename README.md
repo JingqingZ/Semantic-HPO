@@ -298,37 +298,37 @@ Evalution using ICD (FULL ICD CODE):
     - Median jaccard index: 0.01724138
     - Avg overlap_coefficient index: 1.00000000
     - Median overlap_coefficient index: 1.00000000
-    - Avg precision index: 0.02028501
-    - Median precision index: 0.01724138
-    - Avg recall index: 1.00000000
-    - Median recall index: 1.00000000
+    - Avg micro_precision index: 0.02028501
+    - Median micro_precision index: 0.01724138
+    - Avg micro_recall index: 1.00000000
+    - Median micro_recall index: 1.00000000
 - keyword
     - Avg jaccard index: 0.01691733
     - Median jaccard index: 0.00000000
     - Avg overlap_coefficient index: 0.35735850
     - Median overlap_coefficient index: 0.00000000
-    - Avg precision index: 0.01713766
-    - Median precision index: 0.00000000
-    - Avg recall index: 0.35735850
-    - Median recall index: 0.00000000
+    - Avg micro_precision index: 0.01713766
+    - Median micro_precision index: 0.00000000
+    - Avg micro_recall index: 0.35735850
+    - Median micro_recall index: 0.00000000
 - ncbo
     - Avg jaccard index: 0.02170225
     - Median jaccard index: 0.02325581
     - Avg overlap_coefficient index: 0.54991568
     - Median overlap_coefficient index: 0.50000000
-    - Avg precision index: 0.02190450
-    - Median precision index: 0.02325581
-    - Avg recall index: 0.54989774
-    - Median recall index: 0.50000000
+    - Avg micro_precision index: 0.02190450
+    - Median micro_precision index: 0.02325581
+    - Avg micro_recall index: 0.54989774
+    - Median micro_recall index: 0.50000000
 - obo
     - Avg jaccard index: 0.01987377
     - Median jaccard index: 0.02173913
     - Avg overlap_coefficient index: 0.51250477
     - Median overlap_coefficient index: 0.50000000
-    - Avg precision index: 0.02003963
-    - Median precision index: 0.02222222
-    - Avg recall index: 0.51250477
-    - Median recall index: 0.50000000
+    - Avg micro_precision index: 0.02003963
+    - Median micro_precision index: 0.02222222
+    - Avg micro_recall index: 0.51250477
+    - Median micro_recall index: 0.50000000
     
 Evalution using ICD (ONLY FIRST 3-DIGIT of ICD CODE):
 - Apply the reverse mapping HPO -> OMIM -> 3-DIGIT ICD (method #1) and get 3-DIGIT ICD results
@@ -340,34 +340,34 @@ Evalution using ICD (ONLY FIRST 3-DIGIT of ICD CODE):
     - Median jaccard index: 0.04761905
     - Avg overlap_coefficient index: 1.00000000
     - Median overlap_coefficient index: 1.00000000
-    - Avg precision index: 0.04592643
-    - Median precision index: 0.04761905
-    - Avg recall index: 1.00000000
-    - Median recall index: 1.00000000
+    - Avg micro_precision index: 0.04592643
+    - Median micro_precision index: 0.04761905
+    - Avg micro_recall index: 1.00000000
+    - Median micro_recall index: 1.00000000
 - keyword
     - Avg jaccard index: 0.05163031
     - Median jaccard index: 0.04545455
     - Avg overlap_coefficient index: 0.34779038
     - Median overlap_coefficient index: 0.33333333
-    - Avg precision index: 0.05833553
-    - Median precision index: 0.05000000
-    - Avg recall index: 0.34754203
-    - Median recall index: 0.33333333
+    - Avg micro_precision index: 0.05833553
+    - Median micro_precision index: 0.05000000
+    - Avg micro_recall index: 0.34754203
+    - Median micro_recall index: 0.33333333
 - ncbo
     - Avg jaccard index: 0.05173297
     - Median jaccard index: 0.04761905
     - Avg overlap_coefficient index: 0.44728759
     - Median overlap_coefficient index: 0.50000000
-    - Avg precision index: 0.05561317
-    - Median precision index: 0.05000000
-    - Avg recall index: 0.44715160
-    - Median recall index: 0.50000000
+    - Avg micro_precision index: 0.05561317
+    - Median micro_precision index: 0.05000000
+    - Avg micro_recall index: 0.44715160
+    - Median micro_recall index: 0.50000000
 - obo
     - Avg jaccard index: 0.04843394
     - Median jaccard index: 0.04347826
     - Avg overlap_coefficient index: 0.41384477
     - Median overlap_coefficient index: 0.40000000
-    - Avg precision index: 0.05212230
-    - Median precision index: 0.04761905
-    - Avg recall index: 0.41374439
-    - Median recall index: 0.40000000
+    - Avg micro_precision index: 0.05212230
+    - Median micro_precision index: 0.04761905
+    - Avg micro_recall index: 0.41374439
+    - Median micro_recall index: 0.40000000

@@ -13,7 +13,7 @@ import pylab
 def Hbeta(D=np.array([]), beta=1.0):
     """
         Compute the perplexity and the P-row for a specific value of the
-        precision of a Gaussian distribution.
+        micro_precision of a Gaussian distribution.
     """
 
     # Compute P-row and corresponding perplexity
@@ -46,7 +46,7 @@ def x2p(X=np.array([]), tol=1e-5, perplexity=30.0):
         if i % 500 == 0:
             print("Computing P-values for point %d of %d..." % (i, n))
 
-        # Compute the Gaussian kernel and entropy for the current precision
+        # Compute the Gaussian kernel and entropy for the current micro_precision
         betamin = -np.inf
         betamax = np.inf
         Di = D[i, np.concatenate((np.r_[0:i], np.r_[i+1:n]))]
@@ -57,7 +57,7 @@ def x2p(X=np.array([]), tol=1e-5, perplexity=30.0):
         tries = 0
         while np.abs(Hdiff) > tol and tries < 50:
 
-            # If not, increase or decrease precision
+            # If not, increase or decrease micro_precision
             if Hdiff > 0:
                 betamin = beta[i].copy()
                 if betamax == np.inf or betamax == -np.inf:

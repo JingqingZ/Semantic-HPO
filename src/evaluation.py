@@ -10,19 +10,28 @@ import utils
 _set_of_hpos = set(dataloader.hpo_limited_list)
 _global_print_best_worst_case = False
 
-def precision(set1, set2):
+def micro_precision(set1, set2):
     counter = 0
     for s in set2:
         if s in set1:
             counter += 1
     return counter / len(set2)
 
-def recall(set1, set2):
+def micro_recall(set1, set2):
     counter = 0
     for s in set1:
         if s in set2:
             counter += 1
     return counter / len(set1)
+
+def micro_f1(set1, set2):
+    p = micro_precision(set1, set2)
+    r = micro_recall(set1, set2)
+
+    if p + r == 0:
+        return 0
+
+    return (2 * p * r) / (p + r)
 
 # reference: https://en.wikipedia.org/wiki/Overlap_coefficient
 def overlap_coefficient(set1, set2):
@@ -205,7 +214,7 @@ def evaluate_unsupervised_method(column_of_keyword, threshold, decision_mode, fu
     '''
     if comb_mode == "intersection":
         # comb_func = lambda x, y: x & y
-        func = precision
+        func = micro_precision
     elif comb_mode == "union":
         # comb_func = lambda x, y: x | y
         func = recall
@@ -342,7 +351,7 @@ def evaluate_ncbo_annotator(column_of_results="HPO_CODE_LIST_EHR_PHENO_PREDECESS
     # silver = baselines.silver_standard()['HPO_CODE_LIST'].tolist()
     keyword = baselines.keyword_search()['HPO_CODE_LIST_KEYWORD_SEARCH_PREDECESSORS_ONLY'].tolist()
     ncbo = baselines.ehr_phenolyzer_ncbo_annotator()[column_of_results].tolist()
-    func = precision
+    func = micro_precision
 
     silver = combine_methods(keyword, ncbo, func=lambda x, y: x & y)
 
@@ -420,14 +429,14 @@ def evaluate_of_baselines_combination(mode='test', comb_mode="union"):
 
     all_baselines = [keyword, ncbo, obo]
     name_baselines = ['keyword', 'ncbo', 'obo']
-    # func = precision
+    # func = micro_precision
 
     if comb_mode == "intersection":
         # comb_func = lambda x, y: x & y
-        func = precision
+        func = micro_precision
     elif comb_mode == "union":
         # comb_func = lambda x, y: x | y
-        func = recall
+        func = micro_recall
     else:
         raise Exception("Invalid comb_mode")
 
@@ -575,7 +584,7 @@ def evalution_of_baselines_icd(mode='test'):
     # m = [convert_limitedhpo_to_icd(hpostr) for hpostr in tqdm(unsuper)]
     # _evaluate(icd_code, m, func=jaccard)
     # exit()
-    # _evaluate(icd_code, m, func=precision)
+    # _evaluate(icd_code, m, func=micro_precision)
     # _evaluate(icd_code, m, func=recall)
     # exit()
 
@@ -600,14 +609,14 @@ def evalution_of_baselines_icd(mode='test'):
         print(name_baelines[midx])
         _evaluate(icd_code, m, func=jaccard)
         _evaluate(icd_code, m, func=overlap_coefficient)
-        _evaluate(icd_code, m, func=precision)
-        _evaluate(icd_code, m, func=recall)
+        _evaluate(icd_code, m, func=micro_precision)
+        _evaluate(icd_code, m, func=micro_recall)
 
     # print("================")
     # print("unsuper")
     # _evaluate(icd_code, icd_unsuper, func=jaccard)
     # _evaluate(icd_code, icd_unsuper, func=overlap_coefficient)
-    # _evaluate(icd_code, icd_unsuper, func=precision)
+    # _evaluate(icd_code, icd_unsuper, func=micro_precision)
     # _evaluate(icd_code, icd_unsuper, func=recall)
 
 def evalution_of_baselines_3digit_icd(mode='test'):
@@ -714,7 +723,7 @@ def evalution_of_baselines_3digit_icd(mode='test'):
     # m = [convert_limitedhpo_to_icd(hpostr) for hpostr in tqdm(unsuper)]
     # _evaluate(icd_code, m, func=jaccard)
     # exit()
-    # _evaluate(icd_code, m, func=precision)
+    # _evaluate(icd_code, m, func=micro_precision)
     # _evaluate(icd_code, m, func=recall)
     # exit()
 
@@ -768,15 +777,15 @@ def evalution_of_baselines_3digit_icd(mode='test'):
         print(name_baelines[midx])
         _evaluate(icd_code, m, func=jaccard)
         _evaluate(icd_code, m, func=overlap_coefficient)
-        _evaluate(icd_code, m, func=precision)
-        _evaluate(icd_code, m, func=recall)
+        _evaluate(icd_code, m, func=micro_precision)
+        _evaluate(icd_code, m, func=micro_recall)
 
     print("================")
     print("unsuper")
     _evaluate(icd_code, icd_unsuper, func=jaccard)
     _evaluate(icd_code, icd_unsuper, func=overlap_coefficient)
-    _evaluate(icd_code, icd_unsuper, func=precision)
-    _evaluate(icd_code, icd_unsuper, func=recall)
+    _evaluate(icd_code, icd_unsuper, func=micro_precision)
+    _evaluate(icd_code, icd_unsuper, func=micro_recall)
 
 def evaluation_of_random_pick(avg_hpo, func, mode='test'):
 
@@ -838,11 +847,15 @@ def evaluation_between_all_methods(func):
     name_methods = ['silver', 'keyword', 'ncbo', 'obo', 'metamap', 'unsuper']
 
     print(func.__name__)
-    for i in range(len(all_methods)):
+    # for i in range(len(all_methods)):
+    for i in range(1):
         for j in range(len(all_methods)):
             print("==========")
             print("%s vs. %s" % (name_methods[i], name_methods[j]))
-            _evaluate_with_mode(all_methods[i], all_methods[j], func, mode='test')
+            # _evaluate_with_mode(all_methods[i], all_methods[j], func, mode='test')
+            _evaluate_with_mode(all_methods[i], all_methods[j], micro_precision, mode='test')
+            _evaluate_with_mode(all_methods[i], all_methods[j], micro_recall, mode='test')
+            _evaluate_with_mode(all_methods[i], all_methods[j], micro_f1, mode='test')
 
 def evaluation_unsuper_case_study():
     silver = get_icd2hpo_3digit_results()
@@ -894,7 +907,7 @@ def evaluate_for_each_icd():
         _, r = _evaluate(
             [new_silver[index] for index in config.mimic_test_indices],
             [new_unsuper[index] for index in config.mimic_test_indices],
-            func=recall
+            func=micro_recall
         )
         results[icd] = r
 
@@ -972,8 +985,8 @@ if __name__ == '__main__':
     # evaluation_between_all_methods(jaccard)
     # print("====================")
     # evaluation_between_all_methods(overlap_coefficient)
-    _global_print_best_worst_case = True
-    evaluation_unsuper_case_study()
+    # _global_print_best_worst_case = True
+    # evaluation_unsuper_case_study()
     # exit()
 
     # icd_code = get_icd_code_3digit()
@@ -985,6 +998,8 @@ if __name__ == '__main__':
     # print(mimic_data_text[42292])
 
     # evaluate_for_each_icd()
+
+    evaluation_between_all_methods(micro_recall)
 
     pass
 

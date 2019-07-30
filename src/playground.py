@@ -722,6 +722,21 @@ def mapping_hpo_annotation_to_icd():
     print(icd2limitedhpo_mapping['153'])
     print(icd2limitedhpo_mapping['287'])
 
+def analyze_avg_icd_per_ehr():
+    df = pd.read_csv(baselines.silver_standard_results_file)
+    icd_series = df["ICD9_CODE_LIST"]
+    icd2hpo = dataloader.get_3digit_icd_hpo_in_limited_hpo_set()
+
+    num_icd_list = []
+
+    for idx, value in icd_series.iteritems():
+        if type(value) is not str:
+            continue
+        icdlist = set([icd[:3] for icd in value.split("/") if icd[:3] in icd2hpo])
+        num_icd_list.append(len(icdlist))
+
+    print(np.mean(num_icd_list))
+    print(np.median(num_icd_list))
 
 if __name__ == '__main__':
     # icd_distribution_in_mimic()
@@ -830,6 +845,7 @@ if __name__ == '__main__':
     print(df)
     '''
 
-    mapping_hpo_annotation_to_icd()
+    # mapping_hpo_annotation_to_icd()
+    analyze_avg_icd_per_ehr()
 
     pass
