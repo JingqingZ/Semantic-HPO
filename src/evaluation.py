@@ -89,7 +89,7 @@ def _evaluate(list_of_set1, list_of_set2, func):
     # print("Total num of records: %d" % len(list_of_set1))
     # print("Total num of valid comparison: %d" % len(overlap_list))
     print("Avg %s index: %.8f" % (func.__name__, np.mean(overlap_list)))
-    print("Median %s index: %.8f" % (func.__name__, np.median(overlap_list)))
+    # print("Median %s index: %.8f" % (func.__name__, np.median(overlap_list)))
     # print("Avg at least one matched: %.8f" % np.mean(at_least_one_match_list))
     # print("Median at least one matched: %.8f" % np.median(at_least_one_match_list))
 
@@ -264,8 +264,8 @@ def evaluate_unsupervised_method(column_of_keyword, threshold, decision_mode, fu
 
 def evaluate_of_baselines(func, mode='test'):
 
-    # silver = baselines.silver_standard()['HPO_CODE_LIST'].tolist()
-    silver = get_icd2hpo_3digit_results()
+    silver = baselines.silver_standard()['HPO_CODE_LIST'].tolist()
+    # silver = get_icd2hpo_3digit_results()
 
     keyword = baselines.keyword_search()['HPO_CODE_LIST_KEYWORD_SEARCH_PREDECESSORS_ONLY'].tolist()
     ncbo = baselines.ehr_phenolyzer_ncbo_annotator()["HPO_CODE_LIST_EHR_PHENO_PREDECESSORS_ONLY"].tolist()
@@ -838,6 +838,7 @@ def _evaluate_with_mode(silver, prediction, func, mode):
 
 def evaluation_between_all_methods(func):
     silver = get_icd2hpo_3digit_results()
+    # silver = baselines.silver_standard()['HPO_CODE_LIST'].tolist()
     keyword = baselines.keyword_search()['HPO_CODE_LIST_KEYWORD_SEARCH_PREDECESSORS_ONLY'].tolist()
     ncbo = baselines.ehr_phenolyzer_ncbo_annotator()["HPO_CODE_LIST_EHR_PHENO_PREDECESSORS_ONLY"].tolist()
     obo = baselines.obo_annotator()["HPO_CODE_LIST_OBO_ANNO_PREDECESSORS_ONLY"].tolist()

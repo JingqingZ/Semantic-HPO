@@ -13,11 +13,13 @@ ehr_phenolyzer_ncbo_results_file = config.outputs_results_dir + "ehr_pheno_ncbo.
 obo_annotator_results_file = config.outputs_results_dir + "obo_annotator.csv"
 metamap_annotator_results_file = config.outputs_results_dir + "metamap_annotator.csv"
 
-def silver_standard():
+def silver_standard(reload=False):
 
-    if not os.path.exists(silver_standard_results_file):
-    # if True:
+    if reload or not os.path.exists(silver_standard_results_file):
+
         mimic_data = dataloader.load_mimic()
+
+        '''
         icd2omim = dataloader.get_icd_omim_mapping()
         omim2hpo = dataloader.get_omim_hpo_mapping()
 
@@ -47,6 +49,7 @@ def silver_standard():
         # Avg HPO per OMIM: 13
         # Med HPO per OMIM: 9 
         # Min HPO per OMIM: 1
+        '''
 
         icd2fullhpo = dataloader.get_icd_hpo_silver_mapping()
         icd2limitedhpo = dataloader.get_icd_hpo_in_limited_hpo_set(dataloader.hpo_phenotypic_abnormality_id)
@@ -628,15 +631,13 @@ if __name__ == '__main__':
 
     # silver_standard()
 
-    '''
-    mimic_data = silver_standard()
+    mimic_data = silver_standard(reload=True)
     hpo_list = mimic_data["HPO_CODE_LIST"].tolist()
     print("Num of EHR has HPO %d/%d" % (np.sum([1 for hstr in hpo_list if not isinstance(hstr, float) and len(hstr) > 0]), len(hpo_list)))
     print("Avg HPO for all %.f" % np.mean([len([h for h in hstr.split("/") if len(h) > 0]) if isinstance(hstr, str) else 0 for hstr in hpo_list]))
     print("Median HPO for all %.f" % np.median([len([h for h in hstr.split("/") if len(h) > 0]) if isinstance(hstr, str) else 0 for hstr in hpo_list]))
     print("Avg HPO for those have %.f" % np.mean([len([h for h in hstr.split("/") if len(h) > 0]) for hstr in hpo_list if not isinstance(hstr, float) and len(hstr) > 0]))
     print("Median HPO for those have %.f" % np.median([len([h for h in hstr.split("/") if len(h) > 0]) for hstr in hpo_list if not isinstance(hstr, float) and len(hstr) > 0]))
-    '''
     # ALL HPO
     # Num of EHR has HPO 27980/52722
     # Avg HPO for all 8
@@ -644,11 +645,11 @@ if __name__ == '__main__':
     # Avg HPO for those have 15
     # Median HPO for those have 12
     # LIMITED HPO (direct children of HP:0000118)
-    # Num of EHR has HPO 27980/52722                                                                     
-    # Avg HPO for all 3   
+    # Num of EHR has HPO 48691/52722
+    # Avg HPO for all 4
     # Median HPO for all 4
-    # Avg HPO for those have 6                                                                           
-    # Median HPO for those have 5
+    # Avg HPO for those have 4
+    # Median HPO for those have 4
 
     '''
     mimic_data = keyword_search()
@@ -706,7 +707,7 @@ if __name__ == '__main__':
     # Avg HPO for those have 11
     # Median HPO for those have 11
 
-    mimic_data = ehr_phenolyzer_ncbo_annotator()
+    # mimic_data = ehr_phenolyzer_ncbo_annotator()
     # mimic_data = obo_annotator()
     # _ehr_phenolyzer_metamap()
 

@@ -45,7 +45,7 @@ def load_sentence2alpha_mapping(corpus_to_analysis, sigmoid=True):
 
     return sentence2alpha
 
-def results_of_alpha_out(threshold, mode):
+def results_of_alpha_out(threshold, mode, reload=False):
 
 
     assert mode == 'argmax' or mode == 'all' or mode == 'doc' or mode == 'var_threshold' or mode == 'multi'
@@ -56,7 +56,7 @@ def results_of_alpha_out(threshold, mode):
     else:
         unsupervised_method_results_file = config.outputs_results_dir + "unsupervised_method_%s_%.2f.csv" % (mode, threshold)
 
-    if not os.path.exists(unsupervised_method_results_file):
+    if reload or not os.path.exists(unsupervised_method_results_file):
     # if True:
 
         if mode == 'var_threshold':
@@ -419,7 +419,7 @@ def evaluate_results_of_alpha_out_norm_topk_iteration():
             func=evaluation.overlap_coefficient
         )
 
-def annotation_with_threshold():
+def annotation_with_threshold(return_df=False):
 
     threshold=[
         0.3, 0.35, 0.08, 0.7,
@@ -433,7 +433,10 @@ def annotation_with_threshold():
     column_of_keyword="HPO_CODE_LIST_UNSUPERVISED_METHOD_PREDECESSORS_ONLY"
 
     decision_mode = 'var_threshold'
-    unsuper = results_of_alpha_out(threshold=threshold, mode=decision_mode)[column_of_keyword].tolist()
+    unsuper_df = results_of_alpha_out(threshold=threshold, mode=decision_mode)
+    if return_df:
+        return unsuper_df
+    unsuper = unsuper_df[column_of_keyword].tolist()
     return unsuper
 
 if __name__ == '__main__':

@@ -522,7 +522,8 @@ def analyze_appearance_of_hpo(topk):
 
     children_info = dataloader.get_hpo_children_info()
 
-    silver = evaluation.get_icd2hpo_3digit_results()
+    # silver = evaluation.get_icd2hpo_3digit_results()
+    silver = baselines.silver_standard()['HPO_CODE_LIST'].tolist()
     '''
     threshold=[
                   0.3, 0.4, 0.2, 0.8,
@@ -534,11 +535,11 @@ def analyze_appearance_of_hpo(topk):
               ]
     '''
     threshold=[
-        0.3, 0.35, 0.08, 0.7,
-        0.4, 0.7, 0.25, 0.1,
-        0.85, 0.4, 0.2, 0.03,
+        0.23, 0.35, 0.2, 0.7,
+        0.4, 0.84, 0.25, 0.07,
+        0.65, 0.4, 0.2, 0.03,
         0.01, 0.7, 0.4, 0.02,
-        0.85, 0.05, 0.4, 0.8,
+        0.85, 0.06, 0.4, 0.94,
         0.15, 0.55, 0.65, 0.6
     ]
     '''
@@ -551,13 +552,22 @@ def analyze_appearance_of_hpo(topk):
         0.093, 0.571, 0.685, 0.554
     ]
     '''
+    threshold=[
+        0.335, 0.546, 0.504, 0.729,
+        0.700, 0.756, 0.323, 0.113,
+        0.953, 0.940, 0.710, 0.131,
+        0.009, 0.778, 0.511, 0.053,
+        0.963, 0.183, 0.605, 0.923,
+        0.370, 0.901, 0.708, 0.654
+    ]
 
     column_of_keyword="HPO_CODE_LIST_UNSUPERVISED_METHOD_PREDECESSORS_ONLY"
 
     decision_mode = 'var_threshold'
     # threshold = analyze_alpha()
-    unsuper = decision.results_of_alpha_out(threshold=threshold, mode=decision_mode)[column_of_keyword].tolist()
-    return unsuper
+    # threshold = analyze_alpha_1()
+    unsuper = decision.results_of_alpha_out(threshold=threshold, mode=decision_mode, reload=True)[column_of_keyword].tolist()
+    # return unsuper
 
     # unsuper = decision.results_of_alpha_out_norm_topk(topk)[column_of_keyword].tolist()
 
@@ -581,12 +591,17 @@ def analyze_appearance_of_hpo(topk):
     evaluation._evaluate(
         [silver[index] for index in config.mimic_test_indices],
         [unsuper[index] for index in config.mimic_test_indices],
-        func=evaluation.jaccard
+        func=evaluation.micro_precision
     )
     evaluation._evaluate(
         [silver[index] for index in config.mimic_test_indices],
         [unsuper[index] for index in config.mimic_test_indices],
-        func=evaluation.overlap_coefficient
+        func=evaluation.micro_recall
+    )
+    evaluation._evaluate(
+        [silver[index] for index in config.mimic_test_indices],
+        [unsuper[index] for index in config.mimic_test_indices],
+        func=evaluation.micro_f1
     )
 
     counter_silver = [0] * len(dataloader.hpo_limited_list)
@@ -608,7 +623,7 @@ def analyze_appearance_of_hpo(topk):
 
     for hidx in range(len(dataloader.hpo_limited_list)):
         if config._global_verbose_print:
-            print(hidx, dataloader.hpo_limited_list[hidx], counter_silver[hidx], counter_unsuper[hidx], len(children_info[dataloader.hpo_limited_list[hidx]]))
+            print(hidx, dataloader.hpo_limited_list[hidx], threshold[hidx], counter_silver[hidx], counter_unsuper[hidx], len(children_info[dataloader.hpo_limited_list[hidx]]))
 
 def analyze_alpha():
 
@@ -633,6 +648,40 @@ def analyze_alpha():
 
     if config._global_verbose_print:
         print(", ".join(["%.3f" % nt for nt in new_threshold]) )
+    return new_threshold
+
+def analyze_alpha_1():
+
+    with open(config.outputs_results_dir + "mimic_alpha_%s_55000.npy" % 'train', 'rb') as f:
+        mimic_alpha_train_results = np.load(f)
+
+    # silver = evaluation.get_icd2hpo_3digit_results()
+    silver = baselines.silver_standard()['HPO_CODE_LIST'].tolist()
+
+    counter_silver = [0] * len(dataloader.hpo_limited_list)
+
+    hpo2hpoidx = {hpo: hidx for hidx, hpo in enumerate(dataloader.hpo_limited_list)}
+
+    for i in range(len(silver)):
+        if not isinstance(silver[i], str):
+            continue
+        silver_hpolist = [s for s in silver[i].split("/") if len(s) > 0]
+
+        for hpo in silver_hpolist:
+            counter_silver[hpo2hpoidx[hpo]] += 1
+
+    new_threshold = []
+    for i in range(len(dataloader.hpo_limited_list)):
+        hpo_alpha = utils.sigmoid(mimic_alpha_train_results[:, i])
+
+        hpo_per = counter_silver[i] / hpo_alpha.shape[0]
+
+        nt = np.quantile(hpo_alpha, 1 - hpo_per)
+
+        new_threshold.append(nt * 0.8)
+
+    # if config._global_verbose_print:
+    print(", ".join(["%.3f" % nt for nt in new_threshold]) )
     return new_threshold
 
 def analyze_alpha_2():
@@ -737,6 +786,39 @@ def analyze_avg_icd_per_ehr():
 
     print(np.mean(num_icd_list))
     print(np.median(num_icd_list))
+
+
+def fetch_ehr(admission_id, target_hpo):
+    keyword = baselines.keyword_search()
+    ncbo = baselines.ehr_phenolyzer_ncbo_annotator()
+    obo = baselines.obo_annotator()
+    metamap = baselines.aggregate_metamap_results()
+    unsuper = decision.annotation_with_threshold(return_df=True)
+
+    all_methods = [keyword, ncbo, obo, metamap, unsuper]
+    name_methods = ['keyword', 'ncbo', 'obo', 'metamap', 'unsuper']
+    column_name = [
+        'HPO_CODE_LIST_KEYWORD_SEARCH_PREDECESSORS_ONLY',
+        "HPO_CODE_LIST_EHR_PHENO_PREDECESSORS_ONLY",
+        "HPO_CODE_LIST_OBO_ANNO_PREDECESSORS_ONLY",
+        "HPO_CODE_LIST_METAMAP_ANNO_PREDECESSORS_ONLY",
+        "HPO_CODE_LIST_UNSUPERVISED_METHOD_PREDECESSORS_ONLY"
+    ]
+
+    case = unsuper[unsuper["HADM_ID"] == admission_id]
+    case_index = case.index
+
+    for idx, method in enumerate(all_methods):
+        case = method.iloc[case_index]
+        hpo = case[column_name[idx]].tolist()
+        hposet = set(hpo[0].split("/"))
+        print("%s %s %s" % (name_methods[idx], target_hpo, target_hpo in hposet))
+        print(sorted(hposet))
+    # keyword = baselines.keyword_search()['HPO_CODE_LIST_KEYWORD_SEARCH_PREDECESSORS_ONLY']
+    # ncbo = baselines.ehr_phenolyzer_ncbo_annotator()["HPO_CODE_LIST_EHR_PHENO_PREDECESSORS_ONLY"].tolist()
+    # obo = baselines.obo_annotator()["HPO_CODE_LIST_OBO_ANNO_PREDECESSORS_ONLY"].tolist()
+    # metamap = baselines.aggregate_metamap_results()["HPO_CODE_LIST_METAMAP_ANNO_PREDECESSORS_ONLY"].tolist()
+
 
 if __name__ == '__main__':
     # icd_distribution_in_mimic()
@@ -846,6 +928,34 @@ if __name__ == '__main__':
     '''
 
     # mapping_hpo_annotation_to_icd()
-    analyze_avg_icd_per_ehr()
+    # analyze_avg_icd_per_ehr()
+    # analyze_appearance_of_hpo(None)
+    # analyze_alpha_1()
+
+    # fetch_ehr(198908, "HP:0001871")
+    '''
+    # ICD 430
+    keyword HP:0001871 False
+    ncbo HP:0001871 False
+    obo HP:0001871 False
+    metamap HP:0001871 False
+    unsuper HP:0001871 True
+    '''
+    # fetch_ehr(112069, "HP:0003011")
+    '''
+    # ICD 4240
+    keyword HP:0003011 False
+    ncbo HP:0003011 False
+    obo HP:0003011 False
+    metamap HP:0003011 True
+    unsuper HP:0003011 True
+    '''
+    # fetch_ehr(124618, "HP:0000119")
+    """FFFTT"""
+    # fetch_ehr(124618, "HP:0000478")
+    """FFFFT"""
+    # fetch_ehr(124618, "HP:0000924")
+    """FFFFT"""
+    fetch_ehr(197357, "HP:0001626")
 
     pass

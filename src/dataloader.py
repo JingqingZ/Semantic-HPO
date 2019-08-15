@@ -53,14 +53,19 @@ omim2hpo_file = data_dir + "HPO/omim2hpo.json"
 icd2omim_file = data_dir + "HPO/icd2omim.json"
 # ICD to full HPO silver mapping
 icd2full_hpo_file = data_dir + "HPO/icd2fullhpo.json"
+# icd2full_hpo_file = data_dir + "HPO/icd_to_hpo.json"
 full_hpo2icd_file = data_dir + "HPO/fullhpo2icd.json"
 icd2full_hpo_3digit_file = data_dir + "HPO/3digit_icd2fullhpo.json"
+# icd2full_hpo_3digit_file = data_dir + "HPO/icd_3digit_to_hpo.json"
 full_hpo2icd_3digit_file = data_dir + "HPO/3digit_fullhpo2icd.json"
 # ICD to limited HPO silver mapping
 icd2limited_hpo_file = data_dir + "HPO/icd2limitedhpo.json"
+# icd2limited_hpo_file = data_dir + "HPO/icd_to_general_hpo.json"
 limited_hpo2icd_file = data_dir + "HPO/limitedhpo2icd.json"
 icd2limited_hpo_3digit_file = data_dir + "HPO/3digit_icd2limitedhpo.json"
+# icd2limited_hpo_3digit_file = data_dir + "HPO/icd_3digit_to_general_hpo.json"
 limited_hpo2icd_3digit_file = data_dir + "HPO/3digit_limitedhpo2icd.json"
+# latest mapping 14 Aug
 # created by load_mimic()
 mimic_file = data_dir + "MIMIC/ready.csv"
 # created for the OboAnnotator
@@ -759,6 +764,8 @@ def get_icd_omim_mapping():
 
 def get_icd_hpo_silver_mapping():
 
+    """
+    # deprecated
     if not os.path.exists(icd2full_hpo_file):
         icd2omim = get_icd_omim_mapping()
         omim2hpo = get_omim_hpo_mapping()
@@ -777,9 +784,10 @@ def get_icd_hpo_silver_mapping():
             json.dump(tmp_icd2hpo, f)
 
     else:
-        if config._global_verbose_print:
-            print("Loading ICD to full HPO silver mapping from %s" % icd2full_hpo_file)
-        with open(icd2full_hpo_file, 'r') as f:
+    """
+    if config._global_verbose_print:
+        print("Loading ICD to full HPO silver mapping from %s" % icd2full_hpo_file)
+    with open(icd2full_hpo_file, 'r') as f:
             icd2hpo = json.load(f)
             icd2hpo = {k: set(icd2hpo[k]) for k in icd2hpo}
 
@@ -861,6 +869,8 @@ def get_hpo_3digit_icd_silver_mapping():
 # only the direct children nodes of 'HP:0000118' will be considered in all annotation
 def get_icd_hpo_in_limited_hpo_set(root_node=None):
 
+    '''
+    # deprecated
     if not os.path.exists(icd2limited_hpo_file):
     # if True:
 
@@ -899,10 +909,11 @@ def get_icd_hpo_in_limited_hpo_set(root_node=None):
             json.dump(tmp_icd2hpo, f)
 
     else:
+    '''
 
-        if config._global_verbose_print:
-            print("Loading ICD to limited HPO silver mapping from %s" % icd2limited_hpo_file)
-        with open(icd2limited_hpo_file, 'r') as f:
+    if config._global_verbose_print:
+        print("Loading ICD to limited HPO silver mapping from %s" % icd2limited_hpo_file)
+    with open(icd2limited_hpo_file, 'r') as f:
             new_icd2hpo = json.load(f)
             new_icd2hpo = {k: set(new_icd2hpo[k]) for k in new_icd2hpo}
 
@@ -962,6 +973,8 @@ def get_hpo_icd_in_limited_hpo_set():
     return limitedhpo2icd_mapping
 
 def get_3digit_icd_hpo_in_limited_hpo_set():
+    '''
+
     icd2limitedhpo_mapping = get_icd_hpo_in_limited_hpo_set()
 
     new_icd2limitedhpo_mapping = dict()
@@ -976,6 +989,10 @@ def get_3digit_icd_hpo_in_limited_hpo_set():
     with open(icd2limited_hpo_3digit_file, 'w') as f:
         tmp_icd2hpo = {k: list(new_icd2limitedhpo_mapping[k]) for k in new_icd2limitedhpo_mapping}
         json.dump(tmp_icd2hpo, f)
+    '''
+    with open(icd2limited_hpo_3digit_file, 'r') as f:
+        new_icd2limitedhpo_mapping = json.load(f)
+        new_icd2limitedhpo_mapping = {k: list(new_icd2limitedhpo_mapping[k]) for k in new_icd2limitedhpo_mapping}
 
     return new_icd2limitedhpo_mapping
 
